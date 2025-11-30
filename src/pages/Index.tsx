@@ -92,7 +92,7 @@ const Index = () => {
 
         {/* Footer */}
         <div className="text-center mt-24 space-y-2">
-          <p className="text-muted-foreground">Powered by AITAmate</p>
+          <p className="text-muted-foreground">Powered by aitamate</p>
           <a
             href="https://www.aitamate.com"
             target="_blank"
