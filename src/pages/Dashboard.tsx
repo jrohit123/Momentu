@@ -67,7 +67,7 @@ const Dashboard = () => {
               <TrendingUp className="w-8 h-8 text-primary" />
               <div>
                 <h1 className="font-heading text-2xl font-bold text-primary">Momentum</h1>
-                <p className="text-xs text-muted-foreground">by AITAmate</p>
+                <p className="text-xs text-muted-foreground">by aitamate</p>
               </div>
             </div>
 
