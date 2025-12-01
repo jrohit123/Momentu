@@ -3,17 +3,20 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, LogOut, Calendar, Plus, CheckCircle2 } from "lucide-react";
+import { TrendingUp, LogOut, Calendar, Plus, CheckCircle2, ListChecks } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import DailyView from "@/components/dashboard/DailyView";
 import MonthlyView from "@/components/dashboard/MonthlyView";
+import { TaskList } from "@/components/tasks/TaskList";
+import { TaskCreateDialog } from "@/components/tasks/TaskCreateDialog";
 
-type ViewMode = "daily" | "monthly";
+type ViewMode = "daily" | "monthly" | "tasks";
 
 const Dashboard = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>("daily");
+  const [showTaskDialog, setShowTaskDialog] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -88,6 +91,14 @@ const Dashboard = () => {
                 <Calendar className="w-4 h-4 mr-2" />
                 Monthly
               </Button>
+              <Button
+                variant={viewMode === "tasks" ? "default" : "outline"}
+                onClick={() => setViewMode("tasks")}
+                size="sm"
+              >
+                <ListChecks className="w-4 h-4 mr-2" />
+                Tasks
+              </Button>
               <Button variant="outline" size="sm" onClick={handleSignOut}>
                 <LogOut className="w-4 h-4 mr-2" />
                 Sign Out
@@ -101,9 +112,22 @@ const Dashboard = () => {
       <main className="container mx-auto px-4 py-8">
         {viewMode === "daily" ? (
           <DailyView user={user} />
-        ) : (
+        ) : viewMode === "monthly" ? (
           <MonthlyView user={user} />
+        ) : (
+          <TaskList user={user} onCreateClick={() => setShowTaskDialog(true)} />
         )}
+
+        <TaskCreateDialog
+          open={showTaskDialog}
+          onOpenChange={setShowTaskDialog}
+          onSuccess={() => {
+            // Refresh task list if we're on the tasks view
+            if (viewMode === "tasks") {
+              window.location.reload();
+            }
+          }}
+        />
       </main>
     </div>
   );
