@@ -1,11 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { User } from "@supabase/supabase-js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Plus, Clock, CheckCircle, XCircle, AlertCircle } from "lucide-react";
-import { format } from "date-fns";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Plus, Clock, CheckCircle, XCircle, AlertCircle, Calendar } from "lucide-react";
+import { format, formatDistanceToNow } from "date-fns";
+import { useDailyTasks } from "@/hooks/useDailyTasks";
+import { useWorkingDays } from "@/hooks/useWorkingDays";
+import type { Database } from "@/integrations/supabase/types";
+
+type TaskStatus = Database["public"]["Enums"]["task_status"];
 
 interface DailyViewProps {
   user: User;
@@ -13,23 +19,35 @@ interface DailyViewProps {
 
 const DailyView = ({ user }: DailyViewProps) => {
   const [today] = useState(new Date());
-  const [stats, setStats] = useState({
-    total: 0,
-    completed: 0,
-    pending: 0,
-    completion: 0,
-  });
+  const { tasks, pendingTasks, loading, markTaskComplete } = useDailyTasks(user.id, today);
+  const { isWorkingDay } = useWorkingDays(user.id);
+  
+  const workingDayInfo = isWorkingDay(today);
 
-  useEffect(() => {
-    // TODO: Fetch today's tasks and stats from database
-    // For now, showing placeholder data
-    setStats({
-      total: 8,
-      completed: 5,
-      pending: 2,
-      completion: 62,
-    });
-  }, [user]);
+  const stats = useMemo(() => {
+    const completed = tasks.filter(t => t.status === "completed").length;
+    const total = tasks.length;
+    const pending = pendingTasks.length;
+    const completion = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    return { total, completed, pending, completion };
+  }, [tasks, pendingTasks]);
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-6 w-48" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map(i => (
+            <Skeleton key={i} className="h-32" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -38,9 +56,16 @@ const DailyView = ({ user }: DailyViewProps) => {
         <h2 className="font-heading text-3xl font-bold text-foreground">
           Good {new Date().getHours() < 12 ? "Morning" : new Date().getHours() < 18 ? "Afternoon" : "Evening"}
         </h2>
-        <p className="text-muted-foreground text-lg">
-          {format(today, "EEEE, dd MMM yyyy")}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-muted-foreground text-lg">
+            {format(today, "EEEE, dd MMM yyyy")}
+          </p>
+          {!workingDayInfo.isWorkingDay && (
+            <Badge variant="secondary" className="bg-muted">
+              {workingDayInfo.reason}
+            </Badge>
+          )}
+        </div>
       </div>
 
       {/* Stats Overview */}
@@ -101,103 +126,175 @@ const DailyView = ({ user }: DailyViewProps) => {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {/* Sample Task Items - will be replaced with real data */}
-            <TaskItem
-              title="Make Customer Calls"
-              benchmark="10 calls"
-              status="completed"
-              time="09:00 AM"
-            />
-            <TaskItem
-              title="Update Project Documentation"
-              benchmark="3 documents"
-              status="completed"
-              time="11:00 AM"
-            />
-            <TaskItem
-              title="Team Standup Meeting"
-              status="completed"
-              time="02:00 PM"
-            />
-            <TaskItem
-              title="Review Pull Requests"
-              benchmark="5 PRs"
-              status="pending"
-              time="03:30 PM"
-            />
-            <TaskItem
-              title="Send Weekly Report"
-              status="pending"
-              time="05:00 PM"
-            />
-          </div>
+          {tasks.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Calendar className="w-12 h-12 mx-auto mb-2 opacity-50" />
+              <p>No tasks scheduled for today</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {tasks.map((dailyTask) => (
+                <TaskItem
+                  key={dailyTask.assignment.id}
+                  dailyTask={dailyTask}
+                  onStatusChange={(status, quantity, notes) =>
+                    markTaskComplete(dailyTask.assignment.id, status, quantity, notes)
+                  }
+                />
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {/* Pending from Previous Days */}
-      <Card className="shadow-lg border-warning/30">
-        <CardHeader>
-          <CardTitle className="font-heading flex items-center gap-2 text-warning">
-            <AlertCircle className="w-5 h-5" />
-            Pending from Previous Days
-          </CardTitle>
-          <CardDescription>Tasks that need your attention</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            <PendingTaskItem
-              title="Complete Quarterly Review"
-              originalDate="2 days ago"
-              daysOverdue={2}
-            />
-            <PendingTaskItem
-              title="Submit Expense Report"
-              originalDate="Yesterday"
-              daysOverdue={1}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      {pendingTasks.length > 0 && (
+        <Card className="shadow-lg border-warning/30">
+          <CardHeader>
+            <CardTitle className="font-heading flex items-center gap-2 text-warning">
+              <AlertCircle className="w-5 h-5" />
+              Pending from Previous Days
+            </CardTitle>
+            <CardDescription>Tasks that need your attention</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {pendingTasks.map((dailyTask) => (
+                <PendingTaskItem
+                  key={`${dailyTask.assignment.id}-${dailyTask.originalDate}`}
+                  dailyTask={dailyTask}
+                  onComplete={(status, quantity, notes) =>
+                    markTaskComplete(
+                      dailyTask.assignment.id,
+                      status,
+                      quantity,
+                      notes,
+                      dailyTask.originalDate
+                    )
+                  }
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };
 
 interface TaskItemProps {
-  title: string;
-  benchmark?: string;
-  status: "completed" | "pending" | "not-done";
-  time: string;
+  dailyTask: {
+    assignment: {
+      task: {
+        name: string;
+        description: string | null;
+        benchmark: number | null;
+        category: string | null;
+      };
+    };
+    status: TaskStatus;
+    completion?: {
+      quantity_completed: number | null;
+    };
+  };
+  onStatusChange: (status: TaskStatus, quantity?: number, notes?: string) => void;
 }
 
-const TaskItem = ({ title, benchmark, status, time }: TaskItemProps) => {
-  return (
-    <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary/30 transition-all hover:shadow-md bg-card">
-      <div className="flex items-center gap-3 flex-1">
-        {status === "completed" ? (
-          <CheckCircle className="w-5 h-5 text-success flex-shrink-0" />
-        ) : status === "pending" ? (
-          <Clock className="w-5 h-5 text-warning flex-shrink-0" />
-        ) : (
-          <XCircle className="w-5 h-5 text-destructive flex-shrink-0" />
-        )}
-        <div className="flex-1">
-          <div className="font-medium text-foreground">{title}</div>
-          {benchmark && <div className="text-sm text-muted-foreground">{benchmark}</div>}
-        </div>
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="text-sm text-muted-foreground">{time}</span>
-        {status === "pending" && (
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline">Mark Done</Button>
-            <Button size="sm" variant="outline">Not Done</Button>
-          </div>
-        )}
-        {status === "completed" && (
+const TaskItem = ({ dailyTask, onStatusChange }: TaskItemProps) => {
+  const { task } = dailyTask.assignment;
+  const status = dailyTask.status;
+
+  const getStatusIcon = () => {
+    switch (status) {
+      case "completed":
+        return <CheckCircle className="w-5 h-5 text-success flex-shrink-0" />;
+      case "partial":
+        return <Clock className="w-5 h-5 text-warning flex-shrink-0" />;
+      case "pending":
+        return <Clock className="w-5 h-5 text-warning flex-shrink-0" />;
+      case "not_done":
+        return <XCircle className="w-5 h-5 text-destructive flex-shrink-0" />;
+      case "not_applicable":
+        return <XCircle className="w-5 h-5 text-muted-foreground flex-shrink-0" />;
+      default:
+        return <Clock className="w-5 h-5 text-muted-foreground flex-shrink-0" />;
+    }
+  };
+
+  const getStatusBadge = () => {
+    switch (status) {
+      case "completed":
+        return (
           <Badge variant="outline" className="bg-success/10 text-success border-success/30">
             Completed
           </Badge>
+        );
+      case "partial":
+        return (
+          <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30">
+            Partial ({dailyTask.completion?.quantity_completed || 0})
+          </Badge>
+        );
+      case "not_done":
+        return (
+          <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/30">
+            Not Done
+          </Badge>
+        );
+      case "not_applicable":
+        return (
+          <Badge variant="outline" className="bg-muted text-muted-foreground">
+            N/A
+          </Badge>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const canTakeAction = status === "scheduled" || status === "pending";
+
+  return (
+    <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary/30 transition-all hover:shadow-md bg-card">
+      <div className="flex items-center gap-3 flex-1">
+        {getStatusIcon()}
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <div className="font-medium text-foreground">{task.name}</div>
+            {task.category && (
+              <Badge variant="secondary" className="text-xs">
+                {task.category}
+              </Badge>
+            )}
+          </div>
+          {task.description && (
+            <div className="text-sm text-muted-foreground">{task.description}</div>
+          )}
+          {task.benchmark && (
+            <div className="text-sm text-muted-foreground">Target: {task.benchmark}</div>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        {canTakeAction ? (
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => onStatusChange("completed", task.benchmark || undefined)}
+            >
+              Complete
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onStatusChange("not_done")}
+            >
+              Not Done
+            </Button>
+          </div>
+        ) : (
+          getStatusBadge()
         )}
       </div>
     </div>
@@ -205,25 +302,54 @@ const TaskItem = ({ title, benchmark, status, time }: TaskItemProps) => {
 };
 
 interface PendingTaskItemProps {
-  title: string;
-  originalDate: string;
-  daysOverdue: number;
+  dailyTask: {
+    assignment: {
+      task: {
+        name: string;
+        description: string | null;
+        benchmark: number | null;
+      };
+    };
+    originalDate?: string;
+  };
+  onComplete: (status: TaskStatus, quantity?: number, notes?: string) => void;
 }
 
-const PendingTaskItem = ({ title, originalDate, daysOverdue }: PendingTaskItemProps) => {
+const PendingTaskItem = ({ dailyTask, onComplete }: PendingTaskItemProps) => {
+  const { task } = dailyTask.assignment;
+  const originalDate = dailyTask.originalDate;
+
   return (
     <div className="flex items-center justify-between p-4 rounded-lg border border-warning/30 bg-warning/5">
       <div className="flex items-center gap-3 flex-1">
         <AlertCircle className="w-5 h-5 text-warning flex-shrink-0" />
         <div>
-          <div className="font-medium text-foreground">{title}</div>
+          <div className="font-medium text-foreground">{task.name}</div>
+          {task.description && (
+            <div className="text-sm text-muted-foreground">{task.description}</div>
+          )}
           <div className="text-sm text-muted-foreground">
-            Due: {originalDate} · {daysOverdue} working day{daysOverdue > 1 ? "s" : ""} overdue
+            Originally due: {originalDate ? format(new Date(originalDate), "MMM dd, yyyy") : ""}
+            {" · "}
+            {originalDate ? formatDistanceToNow(new Date(originalDate), { addSuffix: true }) : ""}
           </div>
         </div>
       </div>
       <div className="flex gap-2">
-        <Button size="sm" variant="default">Complete Now</Button>
+        <Button
+          size="sm"
+          variant="default"
+          onClick={() => onComplete("completed", task.benchmark || undefined)}
+        >
+          Complete Now
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => onComplete("not_done")}
+        >
+          Mark Not Done
+        </Button>
       </div>
     </div>
   );

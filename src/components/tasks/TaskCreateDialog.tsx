@@ -60,21 +60,37 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess }: TaskCreateDi
         return;
       }
 
-      const { error } = await supabase.from("tasks").insert({
-        name: values.name,
-        description: values.description || null,
-        category: values.category || null,
-        benchmark: values.benchmark || null,
-        recurrence_type: values.recurrence_type,
-        recurrence_config: values.recurrence_config || null,
-        created_by: user.id,
-      });
+      // Create the task
+      const { data: taskData, error: taskError } = await supabase
+        .from("tasks")
+        .insert({
+          name: values.name,
+          description: values.description || null,
+          category: values.category || null,
+          benchmark: values.benchmark || null,
+          recurrence_type: values.recurrence_type,
+          recurrence_config: values.recurrence_config || null,
+          created_by: user.id,
+        })
+        .select()
+        .single();
 
-      if (error) throw error;
+      if (taskError) throw taskError;
+
+      // Auto-assign the task to the creator
+      const { error: assignError } = await supabase
+        .from("task_assignments")
+        .insert({
+          task_id: taskData.id,
+          assigned_to: user.id,
+          assigned_by: user.id,
+        });
+
+      if (assignError) throw assignError;
 
       toast({
         title: "Success!",
-        description: "Task created successfully",
+        description: "Task created and assigned to you",
       });
 
       form.reset();
