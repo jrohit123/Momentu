@@ -9,6 +9,7 @@ import { Plus, Clock, CheckCircle, XCircle, AlertCircle, Calendar } from "lucide
 import { format, formatDistanceToNow } from "date-fns";
 import { useDailyTasks } from "@/hooks/useDailyTasks";
 import { useWorkingDays } from "@/hooks/useWorkingDays";
+import { TaskCompletionDialog } from "@/components/tasks/TaskCompletionDialog";
 import type { Database } from "@/integrations/supabase/types";
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
@@ -203,6 +204,7 @@ interface TaskItemProps {
 const TaskItem = ({ dailyTask, onStatusChange }: TaskItemProps) => {
   const { task } = dailyTask.assignment;
   const status = dailyTask.status;
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const getStatusIcon = () => {
     switch (status) {
@@ -277,22 +279,24 @@ const TaskItem = ({ dailyTask, onStatusChange }: TaskItemProps) => {
       </div>
       <div className="flex items-center gap-3">
         {canTakeAction ? (
-          <div className="flex gap-2">
+          <>
             <Button
               size="sm"
               variant="default"
-              onClick={() => onStatusChange("completed", task.benchmark || undefined)}
+              onClick={() => setDialogOpen(true)}
             >
-              Complete
+              Update Status
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onStatusChange("not_done")}
-            >
-              Not Done
-            </Button>
-          </div>
+            <TaskCompletionDialog
+              open={dialogOpen}
+              onOpenChange={setDialogOpen}
+              taskName={task.name}
+              benchmark={task.benchmark}
+              onSubmit={(status, quantity, notes) => {
+                onStatusChange(status, quantity, notes);
+              }}
+            />
+          </>
         ) : (
           getStatusBadge()
         )}
@@ -318,6 +322,7 @@ interface PendingTaskItemProps {
 const PendingTaskItem = ({ dailyTask, onComplete }: PendingTaskItemProps) => {
   const { task } = dailyTask.assignment;
   const originalDate = dailyTask.originalDate;
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   return (
     <div className="flex items-center justify-between p-4 rounded-lg border border-warning/30 bg-warning/5">
@@ -335,22 +340,22 @@ const PendingTaskItem = ({ dailyTask, onComplete }: PendingTaskItemProps) => {
           </div>
         </div>
       </div>
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant="default"
-          onClick={() => onComplete("completed", task.benchmark || undefined)}
-        >
-          Complete Now
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => onComplete("not_done")}
-        >
-          Mark Not Done
-        </Button>
-      </div>
+      <Button
+        size="sm"
+        variant="default"
+        onClick={() => setDialogOpen(true)}
+      >
+        Update Status
+      </Button>
+      <TaskCompletionDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        taskName={task.name}
+        benchmark={task.benchmark}
+        onSubmit={(status, quantity, notes) => {
+          onComplete(status, quantity, notes);
+        }}
+      />
     </div>
   );
 };
