@@ -3,8 +3,13 @@ import { User } from "@supabase/supabase-js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useMonthlyTasks } from "@/hooks/useMonthlyTasks";
+import { useWorkingDays } from "@/hooks/useWorkingDays";
+import type { Database } from "@/integrations/supabase/types";
+
+type TaskStatus = Database["public"]["Enums"]["task_status"];
 
 interface MonthlyViewProps {
   user: User;
@@ -12,6 +17,8 @@ interface MonthlyViewProps {
 
 const MonthlyView = ({ user }: MonthlyViewProps) => {
   const [currentDate, setCurrentDate] = useState(new Date());
+  const { tasks, loading } = useMonthlyTasks(user.id, currentDate);
+  const { isWorkingDay } = useWorkingDays(user.id);
   
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);
@@ -25,14 +32,22 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1));
   };
 
-  // Sample tasks - will be replaced with real data
-  const sampleTasks = [
-    { id: 1, name: "Make Customer Calls", frequency: "Daily (Mon-Fri)", benchmark: "10" },
-    { id: 2, name: "Update Documentation", frequency: "Daily", benchmark: "3" },
-    { id: 3, name: "Team Standup", frequency: "Daily (Mon-Fri)", benchmark: "-" },
-    { id: 4, name: "Weekly Report", frequency: "Weekly (Friday)", benchmark: "1" },
-    { id: 5, name: "Code Review", frequency: "Daily (Mon-Fri)", benchmark: "5" },
-  ];
+  const getFrequencyLabel = (recurrenceType: string) => {
+    switch (recurrenceType) {
+      case "daily":
+        return "Daily";
+      case "weekly":
+        return "Weekly";
+      case "monthly":
+        return "Monthly";
+      case "yearly":
+        return "Yearly";
+      case "none":
+        return "One-time";
+      default:
+        return recurrenceType;
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -64,64 +79,84 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="border-b-2 border-border">
-                  <th className="sticky left-0 z-10 bg-card px-4 py-3 text-left font-semibold text-sm">
-                    Task Name
-                  </th>
-                  <th className="px-2 py-3 text-center font-semibold text-sm w-24">Frequency</th>
-                  <th className="px-2 py-3 text-center font-semibold text-sm w-20">Target</th>
-                  {daysInMonth.map((day) => (
-                    <th
-                      key={day.toString()}
-                      className={cn(
-                        "px-2 py-3 text-center text-xs font-medium w-12",
-                        isToday(day) && "bg-primary/10",
-                        day.getDay() === 0 && "bg-holiday-weekly-off/50",
-                        day.getDay() === 6 && "bg-holiday-weekly-off/50"
-                      )}
-                    >
-                      <div>{format(day, "EEE")}</div>
-                      <div className="font-bold">{format(day, "d")}</div>
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-muted-foreground">Loading tasks...</div>
+            </div>
+          ) : tasks.length === 0 ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-muted-foreground">No tasks assigned yet</div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="border-b-2 border-border">
+                    <th className="sticky left-0 z-10 bg-card px-4 py-3 text-left font-semibold text-sm">
+                      Task Name
                     </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sampleTasks.map((task) => (
-                  <tr key={task.id} className="border-b border-border hover:bg-muted/30 transition-colors">
-                    <td className="sticky left-0 z-10 bg-card px-4 py-3 font-medium">
-                      {task.name}
-                    </td>
-                    <td className="px-2 py-3 text-center text-sm text-muted-foreground">
-                      {task.frequency}
-                    </td>
-                    <td className="px-2 py-3 text-center text-sm font-medium">
-                      {task.benchmark}
-                    </td>
-                    {daysInMonth.map((day) => (
-                      <td
-                        key={day.toString()}
-                        className={cn(
-                          "px-2 py-3 text-center",
-                          isToday(day) && "bg-primary/10",
-                          day.getDay() === 0 && "bg-holiday-weekly-off/50",
-                          day.getDay() === 6 && "bg-holiday-weekly-off/50"
-                        )}
-                      >
-                        <StatusIndicator
-                          status={getRandomStatus(day)}
-                          isWeeklyOff={day.getDay() === 0 || day.getDay() === 6}
-                        />
-                      </td>
-                    ))}
+                    <th className="px-2 py-3 text-center font-semibold text-sm w-24">Frequency</th>
+                    <th className="px-2 py-3 text-center font-semibold text-sm w-20">Target</th>
+                    {daysInMonth.map((day) => {
+                      const workingDayInfo = isWorkingDay(day);
+                      return (
+                        <th
+                          key={day.toString()}
+                          className={cn(
+                            "px-2 py-3 text-center text-xs font-medium w-12",
+                            isToday(day) && "bg-primary/10",
+                            !workingDayInfo.isWorkingDay && "bg-holiday-weekly-off/50"
+                          )}
+                        >
+                          <div>{format(day, "EEE")}</div>
+                          <div className="font-bold">{format(day, "d")}</div>
+                        </th>
+                      );
+                    })}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {tasks.map((taskData) => {
+                    const task = taskData.assignment.task;
+                    return (
+                      <tr key={taskData.assignment.id} className="border-b border-border hover:bg-muted/30 transition-colors">
+                        <td className="sticky left-0 z-10 bg-card px-4 py-3 font-medium">
+                          {task.name}
+                        </td>
+                        <td className="px-2 py-3 text-center text-sm text-muted-foreground">
+                          {getFrequencyLabel(task.recurrence_type)}
+                        </td>
+                        <td className="px-2 py-3 text-center text-sm font-medium">
+                          {task.benchmark || "-"}
+                        </td>
+                        {daysInMonth.map((day) => {
+                          const dateStr = format(day, "yyyy-MM-dd");
+                          const status = taskData.dailyStatuses.get(dateStr) || "not_applicable";
+                          const workingDayInfo = isWorkingDay(day);
+                          
+                          return (
+                            <td
+                              key={day.toString()}
+                              className={cn(
+                                "px-2 py-3 text-center",
+                                isToday(day) && "bg-primary/10",
+                                !workingDayInfo.isWorkingDay && "bg-holiday-weekly-off/50"
+                              )}
+                            >
+                              <StatusIndicator
+                                status={status}
+                                isWeeklyOff={!workingDayInfo.isWorkingDay}
+                              />
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {/* Legend */}
           <div className="mt-6 flex flex-wrap items-center gap-4 text-sm">
@@ -161,7 +196,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
 };
 
 interface StatusIndicatorProps {
-  status: "completed" | "not-done" | "pending" | "na";
+  status: TaskStatus;
   isWeeklyOff: boolean;
 }
 
@@ -174,11 +209,13 @@ const StatusIndicator = ({ status, isWeeklyOff }: StatusIndicatorProps) => {
     );
   }
 
-  const statusConfig = {
+  const statusConfig: Record<TaskStatus, { bg: string; icon: string; text: string }> = {
     completed: { bg: "bg-success", icon: "✓", text: "text-white" },
-    "not-done": { bg: "bg-destructive", icon: "✗", text: "text-white" },
+    partial: { bg: "bg-warning", icon: "◐", text: "text-white" },
+    not_done: { bg: "bg-destructive", icon: "✗", text: "text-white" },
     pending: { bg: "bg-warning", icon: "!", text: "text-white" },
-    na: { bg: "bg-status-na", icon: "NA", text: "text-white text-[10px]" },
+    not_applicable: { bg: "bg-status-na", icon: "NA", text: "text-white text-[10px]" },
+    scheduled: { bg: "bg-muted", icon: "○", text: "text-muted-foreground" },
   };
 
   const config = statusConfig[status];
@@ -194,13 +231,6 @@ const StatusIndicator = ({ status, isWeeklyOff }: StatusIndicatorProps) => {
       {config.icon}
     </div>
   );
-};
-
-// Helper function to generate random status for demo
-const getRandomStatus = (day: Date): "completed" | "not-done" | "pending" | "na" => {
-  if (day > new Date()) return "na";
-  const statuses: ("completed" | "not-done" | "pending")[] = ["completed", "not-done", "pending"];
-  return statuses[Math.floor(Math.random() * statuses.length)];
 };
 
 export default MonthlyView;
