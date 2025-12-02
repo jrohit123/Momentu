@@ -154,8 +154,8 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
             const key = `${assignment.id}-${checkDateStr}`;
             const completion = completionMap.get(key)?.[0];
 
-            // If not done or marked as pending, it carries forward
-            if (!completion || completion.status === "pending" || completion.status === "not_done") {
+            // If not done, partial, or marked as pending, it carries forward
+            if (!completion || completion.status === "pending" || completion.status === "not_done" || completion.status === "partial") {
               const existingPending = pending.find(
                 (p) => p.assignment.id === assignment.id && p.originalDate === checkDateStr
               );
