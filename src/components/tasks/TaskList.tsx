@@ -5,8 +5,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Calendar, Repeat, Target, Edit, Trash2, Plus } from "lucide-react";
+import { Calendar, Repeat, Target, Edit, Trash2, Plus, UserPlus, Users } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
+import { TaskAssignDialog } from "./TaskAssignDialog";
 
 interface Task {
   id: string;
@@ -28,6 +29,9 @@ interface TaskListProps {
 export const TaskList = ({ user, onCreateClick }: TaskListProps) => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [assignmentCounts, setAssignmentCounts] = useState<Record<string, number>>({});
   const { toast } = useToast();
 
   const fetchTasks = async () => {
@@ -41,6 +45,22 @@ export const TaskList = ({ user, onCreateClick }: TaskListProps) => {
 
       if (error) throw error;
       setTasks(data || []);
+
+      // Fetch assignment counts for each task
+      if (data && data.length > 0) {
+        const { data: assignments, error: assignError } = await supabase
+          .from("task_assignments")
+          .select("task_id")
+          .in("task_id", data.map((t) => t.id));
+
+        if (!assignError && assignments) {
+          const counts: Record<string, number> = {};
+          assignments.forEach((a) => {
+            counts[a.task_id] = (counts[a.task_id] || 0) + 1;
+          });
+          setAssignmentCounts(counts);
+        }
+      }
     } catch (error: any) {
       toast({
         title: "Error",
@@ -55,6 +75,11 @@ export const TaskList = ({ user, onCreateClick }: TaskListProps) => {
   useEffect(() => {
     fetchTasks();
   }, [user.id]);
+
+  const handleAssignClick = (task: Task) => {
+    setSelectedTask(task);
+    setAssignDialogOpen(true);
+  };
 
   const getRecurrenceLabel = (type: string) => {
     const labels: { [key: string]: string } = {
@@ -139,6 +164,15 @@ export const TaskList = ({ user, onCreateClick }: TaskListProps) => {
                   )}
                 </div>
                 <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                    onClick={() => handleAssignClick(task)}
+                  >
+                    <UserPlus className="h-4 w-4 mr-1" />
+                    Assign
+                  </Button>
                   <Button variant="ghost" size="icon" className="h-8 w-8">
                     <Edit className="h-4 w-4" />
                   </Button>
@@ -160,11 +194,25 @@ export const TaskList = ({ user, onCreateClick }: TaskListProps) => {
                     <span>Target: {task.benchmark}</span>
                   </div>
                 )}
+                {assignmentCounts[task.id] > 0 && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Users className="w-4 h-4" />
+                    <span>{assignmentCounts[task.id]} assigned</span>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
+
+      <TaskAssignDialog
+        open={assignDialogOpen}
+        onOpenChange={setAssignDialogOpen}
+        task={selectedTask}
+        userId={user.id}
+        onSuccess={fetchTasks}
+      />
     </div>
   );
 };
