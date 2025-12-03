@@ -3,14 +3,15 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, LogOut, Calendar, Plus, CheckCircle2, ListChecks } from "lucide-react";
+import { TrendingUp, LogOut, Calendar, Plus, CheckCircle2, ListChecks, Palmtree } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import DailyView from "@/components/dashboard/DailyView";
 import MonthlyView from "@/components/dashboard/MonthlyView";
 import { TaskList } from "@/components/tasks/TaskList";
 import { TaskCreateDialog } from "@/components/tasks/TaskCreateDialog";
+import { HolidayManagement } from "@/components/holidays/HolidayManagement";
 
-type ViewMode = "daily" | "monthly" | "tasks";
+type ViewMode = "daily" | "monthly" | "tasks" | "holidays";
 
 const Dashboard = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -99,6 +100,14 @@ const Dashboard = () => {
                 <ListChecks className="w-4 h-4 mr-2" />
                 Tasks
               </Button>
+              <Button
+                variant={viewMode === "holidays" ? "default" : "outline"}
+                onClick={() => setViewMode("holidays")}
+                size="sm"
+              >
+                <Palmtree className="w-4 h-4 mr-2" />
+                Holidays
+              </Button>
               <Button variant="outline" size="sm" onClick={handleSignOut}>
                 <LogOut className="w-4 h-4 mr-2" />
                 Sign Out
@@ -114,8 +123,10 @@ const Dashboard = () => {
           <DailyView user={user} />
         ) : viewMode === "monthly" ? (
           <MonthlyView user={user} />
-        ) : (
+        ) : viewMode === "tasks" ? (
           <TaskList user={user} onCreateClick={() => setShowTaskDialog(true)} />
+        ) : (
+          <HolidayManagement user={user} />
         )}
 
         <TaskCreateDialog
