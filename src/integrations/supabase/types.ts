@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      organizations: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       personal_holidays: {
         Row: {
           approval_status: string | null
@@ -74,6 +95,7 @@ export type Database = {
           id: string
           is_active: boolean | null
           manager_id: string | null
+          organization_id: string
           updated_at: string
         }
         Insert: {
@@ -84,6 +106,7 @@ export type Database = {
           id: string
           is_active?: boolean | null
           manager_id?: string | null
+          organization_id: string
           updated_at?: string
         }
         Update: {
@@ -94,6 +117,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           manager_id?: string | null
+          organization_id?: string
           updated_at?: string
         }
         Relationships: [
@@ -102,6 +126,13 @@ export type Database = {
             columns: ["manager_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -274,22 +305,32 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          organization_id: string
           role: Database["public"]["Enums"]["app_role"]
           user_id: string
         }
         Insert: {
           created_at?: string
           id?: string
+          organization_id: string
           role: Database["public"]["Enums"]["app_role"]
           user_id: string
         }
         Update: {
           created_at?: string
           id?: string
+          organization_id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "user_roles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "user_roles_user_id_fkey"
             columns: ["user_id"]
@@ -332,6 +373,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      same_organization: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
       app_role: "employee" | "manager" | "admin"

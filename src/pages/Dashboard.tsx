@@ -3,15 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, LogOut, Calendar, Plus, CheckCircle2, ListChecks, Palmtree } from "lucide-react";
+import { TrendingUp, LogOut, Calendar, CheckCircle2, ListChecks, Palmtree, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import DailyView from "@/components/dashboard/DailyView";
 import MonthlyView from "@/components/dashboard/MonthlyView";
 import { TaskList } from "@/components/tasks/TaskList";
 import { TaskCreateDialog } from "@/components/tasks/TaskCreateDialog";
 import { HolidayManagement } from "@/components/holidays/HolidayManagement";
+import { UserManagement } from "@/components/admin/UserManagement";
+import { useUserRole } from "@/hooks/useUserRole";
 
-type ViewMode = "daily" | "monthly" | "tasks" | "holidays";
+type ViewMode = "daily" | "monthly" | "tasks" | "holidays" | "admin";
 
 const Dashboard = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -20,6 +22,7 @@ const Dashboard = () => {
   const [showTaskDialog, setShowTaskDialog] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { isAdmin, loading: roleLoading } = useUserRole(user?.id || "");
 
   useEffect(() => {
     // Check for existing session
@@ -108,6 +111,16 @@ const Dashboard = () => {
                 <Palmtree className="w-4 h-4 mr-2" />
                 Holidays
               </Button>
+              {isAdmin && (
+                <Button
+                  variant={viewMode === "admin" ? "default" : "outline"}
+                  onClick={() => setViewMode("admin")}
+                  size="sm"
+                >
+                  <Shield className="w-4 h-4 mr-2" />
+                  Admin
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={handleSignOut}>
                 <LogOut className="w-4 h-4 mr-2" />
                 Sign Out
@@ -125,9 +138,11 @@ const Dashboard = () => {
           <MonthlyView user={user} />
         ) : viewMode === "tasks" ? (
           <TaskList user={user} onCreateClick={() => setShowTaskDialog(true)} />
-        ) : (
+        ) : viewMode === "holidays" ? (
           <HolidayManagement user={user} />
-        )}
+        ) : viewMode === "admin" ? (
+          <UserManagement user={user} />
+        ) : null}
 
         <TaskCreateDialog
           open={showTaskDialog}

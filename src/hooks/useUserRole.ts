@@ -6,19 +6,36 @@ type AppRole = Database["public"]["Enums"]["app_role"];
 
 export const useUserRole = (userId: string) => {
   const [roles, setRoles] = useState<AppRole[]>([]);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchRoles = async () => {
-      if (!userId) return;
+      if (!userId) {
+        setLoading(false);
+        return;
+      }
 
-      const { data, error } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", userId);
+      // First get user's organization
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("organization_id")
+        .eq("id", userId)
+        .single();
 
-      if (!error && data) {
-        setRoles(data.map((r) => r.role));
+      if (profile?.organization_id) {
+        setOrganizationId(profile.organization_id);
+
+        // Get roles for this user in their organization
+        const { data, error } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", userId)
+          .eq("organization_id", profile.organization_id);
+
+        if (!error && data) {
+          setRoles(data.map((r) => r.role));
+        }
       }
       setLoading(false);
     };
@@ -30,5 +47,5 @@ export const useUserRole = (userId: string) => {
   const isManager = roles.includes("manager");
   const isEmployee = roles.includes("employee");
 
-  return { roles, isAdmin, isManager, isEmployee, loading };
+  return { roles, isAdmin, isManager, isEmployee, organizationId, loading };
 };
