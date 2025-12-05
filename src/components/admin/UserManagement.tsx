@@ -5,10 +5,13 @@ import { useUserRole } from "@/hooks/useUserRole";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, UserPlus, Users, Building2 } from "lucide-react";
+import { Shield, UserPlus, Users, Building2, Mail, Clock, X, Copy, Check } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -20,6 +23,15 @@ interface UserWithRoles {
   roles: AppRole[];
 }
 
+interface Invitation {
+  id: string;
+  email: string;
+  role: AppRole;
+  status: string;
+  expires_at: string;
+  token: string;
+}
+
 interface UserManagementProps {
   user: User;
 }
@@ -27,8 +39,14 @@ interface UserManagementProps {
 export const UserManagement = ({ user }: UserManagementProps) => {
   const { isAdmin, loading: roleLoading } = useUserRole(user.id);
   const [users, setUsers] = useState<UserWithRoles[]>([]);
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [organization, setOrganization] = useState<{ id: string; name: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<AppRole>("employee");
+  const [inviting, setInviting] = useState(false);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -39,7 +57,6 @@ export const UserManagement = ({ user }: UserManagementProps) => {
 
   const fetchUsersAndOrg = async () => {
     try {
-      // Get current user's organization
       const { data: profile } = await supabase
         .from("profiles")
         .select("organization_id")
@@ -48,7 +65,6 @@ export const UserManagement = ({ user }: UserManagementProps) => {
 
       if (!profile) return;
 
-      // Get organization details
       const { data: org } = await supabase
         .from("organizations")
         .select("*")
@@ -57,7 +73,6 @@ export const UserManagement = ({ user }: UserManagementProps) => {
 
       setOrganization(org);
 
-      // Get all users in the organization
       const { data: orgProfiles } = await supabase
         .from("profiles")
         .select("id, email, full_name")
@@ -65,7 +80,6 @@ export const UserManagement = ({ user }: UserManagementProps) => {
 
       if (!orgProfiles) return;
 
-      // Get roles for all users
       const { data: roles } = await supabase
         .from("user_roles")
         .select("user_id, role")
@@ -79,6 +93,16 @@ export const UserManagement = ({ user }: UserManagementProps) => {
       }));
 
       setUsers(usersWithRoles);
+
+      // Fetch pending invitations
+      const { data: invites } = await supabase
+        .from("invitations")
+        .select("id, email, role, status, expires_at, token")
+        .eq("organization_id", profile.organization_id)
+        .eq("status", "pending")
+        .gt("expires_at", new Date().toISOString());
+
+      setInvitations(invites || []);
     } catch (error) {
       console.error("Error fetching users:", error);
     } finally {
@@ -90,14 +114,12 @@ export const UserManagement = ({ user }: UserManagementProps) => {
     if (!organization) return;
 
     try {
-      // Remove existing roles for this user in this org
       await supabase
         .from("user_roles")
         .delete()
         .eq("user_id", userId)
         .eq("organization_id", organization.id);
 
-      // Add the new role
       const { error } = await supabase.from("user_roles").insert({
         user_id: userId,
         role: newRole,
@@ -115,6 +137,72 @@ export const UserManagement = ({ user }: UserManagementProps) => {
         variant: "destructive",
       });
     }
+  };
+
+  const handleInvite = async () => {
+    if (!organization || !inviteEmail.trim()) return;
+
+    setInviting(true);
+    try {
+      const { data, error } = await supabase
+        .from("invitations")
+        .insert({
+          email: inviteEmail.trim().toLowerCase(),
+          organization_id: organization.id,
+          invited_by: user.id,
+          role: inviteRole,
+        })
+        .select("token")
+        .single();
+
+      if (error) throw error;
+
+      toast({
+        title: "Invitation created!",
+        description: "Share the invitation link with the user.",
+      });
+
+      setInviteDialogOpen(false);
+      setInviteEmail("");
+      setInviteRole("employee");
+      fetchUsersAndOrg();
+    } catch (error: any) {
+      toast({
+        title: "Error creating invitation",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const handleCancelInvitation = async (invitationId: string) => {
+    try {
+      const { error } = await supabase
+        .from("invitations")
+        .delete()
+        .eq("id", invitationId);
+
+      if (error) throw error;
+
+      toast({ title: "Invitation cancelled" });
+      fetchUsersAndOrg();
+    } catch (error: any) {
+      toast({
+        title: "Error cancelling invitation",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const copyInviteLink = (token: string) => {
+    const link = `${window.location.origin}/auth?token=${token}`;
+    navigator.clipboard.writeText(link);
+    setCopiedToken(token);
+    setTimeout(() => setCopiedToken(null), 2000);
+    toast({ title: "Link copied to clipboard" });
   };
 
   const getRoleBadgeVariant = (role: AppRole) => {
@@ -170,6 +258,114 @@ export const UserManagement = ({ user }: UserManagementProps) => {
         </CardContent>
       </Card>
 
+      {/* Invite Users */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-primary" />
+              Invite Users
+            </CardTitle>
+            <CardDescription>
+              Send invitation links to add new team members
+            </CardDescription>
+          </div>
+          <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Mail className="w-4 h-4 mr-2" />
+                Invite User
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Invite New User</DialogTitle>
+                <DialogDescription>
+                  Create an invitation link to add a new team member to {organization?.name}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="invite-email">Email Address</Label>
+                  <Input
+                    id="invite-email"
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="user@example.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="invite-role">Role</Label>
+                  <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as AppRole)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="employee">Employee</SelectItem>
+                      <SelectItem value="manager">Manager</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleInvite} disabled={inviting || !inviteEmail.trim()}>
+                  {inviting ? "Creating..." : "Create Invitation"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </CardHeader>
+        {invitations.length > 0 && (
+          <CardContent>
+            <div className="space-y-3">
+              {invitations.map((inv) => (
+                <div
+                  key={inv.id}
+                  className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
+                >
+                  <div className="flex items-center gap-3">
+                    <Mail className="w-4 h-4 text-muted-foreground" />
+                    <div>
+                      <p className="font-medium">{inv.email}</p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        Expires {new Date(inv.expires_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <Badge variant={getRoleBadgeVariant(inv.role)}>{inv.role}</Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => copyInviteLink(inv.token)}
+                    >
+                      {copiedToken === inv.token ? (
+                        <Check className="w-4 h-4" />
+                      ) : (
+                        <Copy className="w-4 h-4" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleCancelInvitation(inv.id)}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
       {/* User Management */}
       <Card>
         <CardHeader>
@@ -178,7 +374,7 @@ export const UserManagement = ({ user }: UserManagementProps) => {
             Team Members
           </CardTitle>
           <CardDescription>
-            Manage user roles within your organization. Assign admin, manager, or employee roles.
+            Manage user roles within your organization
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -235,16 +431,6 @@ export const UserManagement = ({ user }: UserManagementProps) => {
               ))}
             </TableBody>
           </Table>
-
-          <div className="mt-6 p-4 bg-muted/50 rounded-lg">
-            <h4 className="font-medium flex items-center gap-2 mb-2">
-              <UserPlus className="w-4 h-4" />
-              Adding New Users
-            </h4>
-            <p className="text-sm text-muted-foreground">
-              New users can sign up using the authentication page. They will automatically be added to your organization and assigned the employee role. You can then change their role here.
-            </p>
-          </div>
         </CardContent>
       </Card>
     </div>

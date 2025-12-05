@@ -1,21 +1,72 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, TrendingUp } from "lucide-react";
+import { Loader2, TrendingUp, Building2, UserPlus } from "lucide-react";
 
 const Auth = () => {
+  const [searchParams] = useSearchParams();
+  const invitationToken = searchParams.get("token");
+  
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const [organizationName, setOrganizationName] = useState("");
+  const [signupMode, setSignupMode] = useState<"new-org" | "invitation">(
+    invitationToken ? "invitation" : "new-org"
+  );
+  const [invitationDetails, setInvitationDetails] = useState<{
+    email: string;
+    organization_name: string;
+    role: string;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  // Fetch invitation details if token exists
+  useEffect(() => {
+    if (invitationToken) {
+      fetchInvitationDetails();
+    }
+  }, [invitationToken]);
+
+  const fetchInvitationDetails = async () => {
+    const { data, error } = await supabase
+      .from("invitations")
+      .select(`
+        email,
+        role,
+        organizations:organization_id(name)
+      `)
+      .eq("token", invitationToken)
+      .eq("status", "pending")
+      .gt("expires_at", new Date().toISOString())
+      .single();
+
+    if (data && !error) {
+      setInvitationDetails({
+        email: data.email,
+        organization_name: (data.organizations as any)?.name || "Unknown",
+        role: data.role,
+      });
+      setEmail(data.email);
+      setIsLogin(false);
+      setSignupMode("invitation");
+    } else {
+      toast({
+        title: "Invalid Invitation",
+        description: "This invitation link is invalid or has expired.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,11 +82,20 @@ const Auth = () => {
         toast({ title: "Welcome back!", description: "Signed in successfully" });
         navigate("/dashboard");
       } else {
+        // Build metadata based on signup mode
+        const metadata: Record<string, string> = { full_name: fullName };
+        
+        if (signupMode === "invitation" && invitationToken) {
+          metadata.invitation_token = invitationToken;
+        } else if (signupMode === "new-org" && organizationName.trim()) {
+          metadata.organization_name = organizationName.trim();
+        }
+
         const { error } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            data: { full_name: fullName },
+            data: metadata,
             emailRedirectTo: `${window.location.origin}/dashboard`,
           },
         });
@@ -69,26 +129,84 @@ const Auth = () => {
 
         <Card className="shadow-lg border-border/50 animate-scale-in">
           <CardHeader>
-            <CardTitle className="font-heading">{isLogin ? "Welcome Back" : "Create Account"}</CardTitle>
+            <CardTitle className="font-heading">
+              {isLogin ? "Welcome Back" : invitationDetails ? "Accept Invitation" : "Create Account"}
+            </CardTitle>
             <CardDescription>
-              {isLogin ? "Sign in to continue your momentum" : "Start managing your tasks effectively"}
+              {isLogin 
+                ? "Sign in to continue your momentum" 
+                : invitationDetails 
+                  ? `Join ${invitationDetails.organization_name} as ${invitationDetails.role}`
+                  : "Start managing your tasks effectively"}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleAuth} className="space-y-4">
               {!isLogin && (
-                <div className="space-y-2">
-                  <Label htmlFor="fullName">Full Name</Label>
-                  <Input
-                    id="fullName"
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="John Doe"
-                    required
-                  />
-                </div>
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="fullName">Full Name</Label>
+                    <Input
+                      id="fullName"
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="John Doe"
+                      required
+                    />
+                  </div>
+
+                  {!invitationToken && (
+                    <div className="space-y-3">
+                      <Label>How would you like to join?</Label>
+                      <RadioGroup
+                        value={signupMode}
+                        onValueChange={(v) => setSignupMode(v as "new-org" | "invitation")}
+                        className="space-y-2"
+                      >
+                        <div className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 cursor-pointer">
+                          <RadioGroupItem value="new-org" id="new-org" />
+                          <Label htmlFor="new-org" className="flex items-center gap-2 cursor-pointer">
+                            <Building2 className="w-4 h-4 text-primary" />
+                            Create a new organization
+                          </Label>
+                        </div>
+                        <div className="flex items-center space-x-3 p-3 rounded-lg border border-border hover:bg-muted/50 cursor-pointer">
+                          <RadioGroupItem value="invitation" id="invitation" />
+                          <Label htmlFor="invitation" className="flex items-center gap-2 cursor-pointer">
+                            <UserPlus className="w-4 h-4 text-primary" />
+                            I have an invitation link
+                          </Label>
+                        </div>
+                      </RadioGroup>
+                    </div>
+                  )}
+
+                  {signupMode === "new-org" && !invitationToken && (
+                    <div className="space-y-2">
+                      <Label htmlFor="orgName">Organization Name</Label>
+                      <Input
+                        id="orgName"
+                        type="text"
+                        value={organizationName}
+                        onChange={(e) => setOrganizationName(e.target.value)}
+                        placeholder="Acme Inc."
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        You'll be the admin of this organization
+                      </p>
+                    </div>
+                  )}
+
+                  {signupMode === "invitation" && !invitationToken && (
+                    <div className="p-3 bg-muted/50 rounded-lg text-sm text-muted-foreground">
+                      <p>Please use the invitation link sent to your email to sign up.</p>
+                    </div>
+                  )}
+                </>
               )}
+
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -98,6 +216,7 @@ const Auth = () => {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@company.com"
                   required
+                  disabled={!!invitationDetails}
                 />
               </div>
               <div className="space-y-2">
@@ -111,14 +230,18 @@ const Auth = () => {
                   required
                 />
               </div>
-              <Button type="submit" className="w-full" disabled={loading}>
+              <Button 
+                type="submit" 
+                className="w-full" 
+                disabled={loading || (!isLogin && signupMode === "invitation" && !invitationToken)}
+              >
                 {loading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Please wait
                   </>
                 ) : (
-                  <>{isLogin ? "Sign In" : "Create Account"}</>
+                  <>{isLogin ? "Sign In" : invitationDetails ? "Accept & Create Account" : "Create Account"}</>
                 )}
               </Button>
             </form>
@@ -136,7 +259,7 @@ const Auth = () => {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground">
-          By AITAmate · Intelligent Task Management
+          By aitamate · Intelligent Task Management
         </p>
       </div>
     </div>
