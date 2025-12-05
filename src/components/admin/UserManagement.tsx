@@ -21,6 +21,8 @@ interface UserWithRoles {
   email: string;
   full_name: string;
   roles: AppRole[];
+  manager_id: string | null;
+  manager_name: string | null;
 }
 
 interface Invitation {
@@ -75,7 +77,7 @@ export const UserManagement = ({ user }: UserManagementProps) => {
 
       const { data: orgProfiles } = await supabase
         .from("profiles")
-        .select("id, email, full_name")
+        .select("id, email, full_name, manager_id")
         .eq("organization_id", profile.organization_id);
 
       if (!orgProfiles) return;
@@ -85,12 +87,17 @@ export const UserManagement = ({ user }: UserManagementProps) => {
         .select("user_id, role")
         .eq("organization_id", profile.organization_id);
 
-      const usersWithRoles: UserWithRoles[] = orgProfiles.map((p) => ({
-        id: p.id,
-        email: p.email,
-        full_name: p.full_name,
-        roles: roles?.filter((r) => r.user_id === p.id).map((r) => r.role) || [],
-      }));
+      const usersWithRoles: UserWithRoles[] = orgProfiles.map((p) => {
+        const manager = orgProfiles.find((m) => m.id === p.manager_id);
+        return {
+          id: p.id,
+          email: p.email,
+          full_name: p.full_name,
+          roles: roles?.filter((r) => r.user_id === p.id).map((r) => r.role) || [],
+          manager_id: p.manager_id,
+          manager_name: manager?.full_name || null,
+        };
+      });
 
       setUsers(usersWithRoles);
 
@@ -133,6 +140,26 @@ export const UserManagement = ({ user }: UserManagementProps) => {
     } catch (error: any) {
       toast({
         title: "Error updating role",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleManagerChange = async (userId: string, managerId: string | null) => {
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ manager_id: managerId === "none" ? null : managerId })
+        .eq("id", userId);
+
+      if (error) throw error;
+
+      toast({ title: "Manager updated successfully" });
+      fetchUsersAndOrg();
+    } catch (error: any) {
+      toast({
+        title: "Error updating manager",
         description: error.message,
         variant: "destructive",
       });
@@ -383,52 +410,74 @@ export const UserManagement = ({ user }: UserManagementProps) => {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
-                <TableHead>Current Role</TableHead>
-                <TableHead>Change Role</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Manager</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((u) => (
-                <TableRow key={u.id}>
-                  <TableCell className="font-medium">
-                    {u.full_name}
-                    {u.id === user.id && (
-                      <Badge variant="outline" className="ml-2 text-xs">
-                        You
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{u.email}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      {u.roles.map((role) => (
-                        <Badge key={role} variant={getRoleBadgeVariant(role)}>
-                          {role}
+              {users.map((u) => {
+                const managers = users.filter(
+                  (m) => m.id !== u.id && m.roles.includes("manager")
+                );
+                return (
+                  <TableRow key={u.id}>
+                    <TableCell className="font-medium">
+                      {u.full_name}
+                      {u.id === user.id && (
+                        <Badge variant="outline" className="ml-2 text-xs">
+                          You
                         </Badge>
-                      ))}
-                      {u.roles.length === 0 && (
-                        <Badge variant="outline">No role</Badge>
                       )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Select
-                      value={u.roles[0] || "employee"}
-                      onValueChange={(value) => handleRoleChange(u.id, value as AppRole)}
-                      disabled={u.id === user.id}
-                    >
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="manager">Manager</SelectItem>
-                        <SelectItem value="employee">Employee</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                    <TableCell>
+                      <Select
+                        value={u.roles[0] || "employee"}
+                        onValueChange={(value) => handleRoleChange(u.id, value as AppRole)}
+                        disabled={u.id === user.id}
+                      >
+                        <SelectTrigger className="w-28">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="manager">Manager</SelectItem>
+                          <SelectItem value="employee">Employee</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        value={u.manager_id || "none"}
+                        onValueChange={(value) => handleManagerChange(u.id, value)}
+                        disabled={u.roles.includes("admin")}
+                      >
+                        <SelectTrigger className="w-36">
+                          <SelectValue placeholder="No manager" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No manager</SelectItem>
+                          {managers.map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.full_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        {u.roles.map((role) => (
+                          <Badge key={role} variant={getRoleBadgeVariant(role)}>
+                            {role}
+                          </Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </CardContent>
