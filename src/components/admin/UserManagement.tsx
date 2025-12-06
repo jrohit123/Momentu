@@ -10,8 +10,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, UserPlus, Users, Building2, Mail, Clock, X, Copy, Check } from "lucide-react";
+import { Shield, UserPlus, Users, Building2, Mail, Clock, X, Copy, Check, Network } from "lucide-react";
+import { TeamHierarchy } from "./TeamHierarchy";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -312,203 +314,235 @@ export const UserManagement = ({ user }: UserManagementProps) => {
         </CardContent>
       </Card>
 
-      {/* Invite Users */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <UserPlus className="w-5 h-5 text-primary" />
-              Invite Users
-            </CardTitle>
-            <CardDescription>
-              Send invitation links to add new team members
-            </CardDescription>
-          </div>
-          <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Mail className="w-4 h-4 mr-2" />
-                Invite User
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Invite New User</DialogTitle>
-                <DialogDescription>
-                  Create an invitation link to add a new team member to {organization?.name}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="invite-email">Email Address</Label>
-                  <Input
-                    id="invite-email"
-                    type="email"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    placeholder="user@example.com"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="invite-role">Role</Label>
-                  <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as AppRole)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="employee">Employee</SelectItem>
-                      <SelectItem value="manager">Manager</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleInvite} disabled={inviting || !inviteEmail.trim()}>
-                  {inviting ? "Creating..." : "Create Invitation"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </CardHeader>
-        {invitations.length > 0 && (
-          <CardContent>
-            <div className="space-y-3">
-              {invitations.map((inv) => (
-                <div
-                  key={inv.id}
-                  className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <Mail className="w-4 h-4 text-muted-foreground" />
-                    <div>
-                      <p className="font-medium">{inv.email}</p>
-                      <p className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        Expires {new Date(inv.expires_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <Badge variant={getRoleBadgeVariant(inv.role)}>{inv.role}</Badge>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => copyInviteLink(inv.token)}
-                    >
-                      {copiedToken === inv.token ? (
-                        <Check className="w-4 h-4" />
-                      ) : (
-                        <Copy className="w-4 h-4" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleCancelInvitation(inv.id)}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        )}
-      </Card>
-
-      {/* User Management */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="w-5 h-5 text-primary" />
+      {/* Tabs for different admin sections */}
+      <Tabs defaultValue="members" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="members" className="flex items-center gap-2">
+            <Users className="w-4 h-4" />
             Team Members
-          </CardTitle>
-          <CardDescription>
-            Manage user roles within your organization
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Manager</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.map((u) => {
-                const managers = users.filter(
-                  (m) => m.id !== u.id && m.roles.includes("manager")
-                );
-                return (
-                  <TableRow key={u.id}>
-                    <TableCell className="font-medium">
-                      {u.full_name}
-                      {u.id === user.id && (
-                        <Badge variant="outline" className="ml-2 text-xs">
-                          You
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{u.email}</TableCell>
-                    <TableCell>
-                      <Select
-                        value={u.roles[0] || "employee"}
-                        onValueChange={(value) => handleRoleChange(u.id, value as AppRole)}
-                        disabled={u.id === user.id}
-                      >
-                        <SelectTrigger className="w-28">
+          </TabsTrigger>
+          <TabsTrigger value="hierarchy" className="flex items-center gap-2">
+            <Network className="w-4 h-4" />
+            Hierarchy
+          </TabsTrigger>
+          <TabsTrigger value="invitations" className="flex items-center gap-2">
+            <UserPlus className="w-4 h-4" />
+            Invitations
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Team Members Tab */}
+        <TabsContent value="members">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-primary" />
+                Team Members
+              </CardTitle>
+              <CardDescription>
+                Manage user roles within your organization
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Manager</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {users.map((u) => {
+                    const managers = users.filter(
+                      (m) => m.id !== u.id && m.roles.includes("manager")
+                    );
+                    return (
+                      <TableRow key={u.id}>
+                        <TableCell className="font-medium">
+                          {u.full_name}
+                          {u.id === user.id && (
+                            <Badge variant="outline" className="ml-2 text-xs">
+                              You
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                        <TableCell>
+                          <Select
+                            value={u.roles[0] || "employee"}
+                            onValueChange={(value) => handleRoleChange(u.id, value as AppRole)}
+                            disabled={u.id === user.id}
+                          >
+                            <SelectTrigger className="w-28">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="admin">Admin</SelectItem>
+                              <SelectItem value="manager">Manager</SelectItem>
+                              <SelectItem value="employee">Employee</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            value={u.manager_id || "none"}
+                            onValueChange={(value) => handleManagerChange(u.id, value)}
+                            disabled={u.roles.includes("admin")}
+                          >
+                            <SelectTrigger className="w-36">
+                              <SelectValue placeholder="No manager" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">No manager</SelectItem>
+                              {managers.map((m) => (
+                                <SelectItem key={m.id} value={m.id}>
+                                  {m.full_name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {u.roles.map((role) => (
+                              <Badge key={role} variant={getRoleBadgeVariant(role)}>
+                                {role}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Hierarchy Tab */}
+        <TabsContent value="hierarchy">
+          <TeamHierarchy user={user} />
+        </TabsContent>
+
+        {/* Invitations Tab */}
+        <TabsContent value="invitations">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-primary" />
+                  Pending Invitations
+                </CardTitle>
+                <CardDescription>
+                  Manage invitation links for new team members
+                </CardDescription>
+              </div>
+              <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Mail className="w-4 h-4 mr-2" />
+                    Invite User
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Invite New User</DialogTitle>
+                    <DialogDescription>
+                      Create an invitation link to add a new team member to {organization?.name}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="invite-email">Email Address</Label>
+                      <Input
+                        id="invite-email"
+                        type="email"
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        placeholder="user@example.com"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="invite-role">Role</Label>
+                      <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as AppRole)}>
+                        <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="manager">Manager</SelectItem>
                           <SelectItem value="employee">Employee</SelectItem>
+                          <SelectItem value="manager">Manager</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
                         </SelectContent>
                       </Select>
-                    </TableCell>
-                    <TableCell>
-                      <Select
-                        value={u.manager_id || "none"}
-                        onValueChange={(value) => handleManagerChange(u.id, value)}
-                        disabled={u.roles.includes("admin")}
-                      >
-                        <SelectTrigger className="w-36">
-                          <SelectValue placeholder="No manager" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">No manager</SelectItem>
-                          {managers.map((m) => (
-                            <SelectItem key={m.id} value={m.id}>
-                              {m.full_name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        {u.roles.map((role) => (
-                          <Badge key={role} variant={getRoleBadgeVariant(role)}>
-                            {role}
-                          </Badge>
-                        ))}
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={handleInvite} disabled={inviting || !inviteEmail.trim()}>
+                      {inviting ? "Sending..." : "Send Invitation"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </CardHeader>
+            <CardContent>
+              {invitations.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Mail className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                  <p>No pending invitations</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {invitations.map((inv) => (
+                    <div
+                      key={inv.id}
+                      className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Mail className="w-4 h-4 text-muted-foreground" />
+                        <div>
+                          <p className="font-medium">{inv.email}</p>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            Expires {new Date(inv.expires_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <Badge variant={getRoleBadgeVariant(inv.role)}>{inv.role}</Badge>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => copyInviteLink(inv.token)}
+                        >
+                          {copiedToken === inv.token ? (
+                            <Check className="w-4 h-4" />
+                          ) : (
+                            <Copy className="w-4 h-4" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCancelInvitation(inv.id)}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
