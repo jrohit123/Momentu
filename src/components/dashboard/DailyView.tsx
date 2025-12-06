@@ -16,9 +16,10 @@ type TaskStatus = Database["public"]["Enums"]["task_status"];
 
 interface DailyViewProps {
   user: User;
+  onCreateTask?: () => void;
 }
 
-const DailyView = ({ user }: DailyViewProps) => {
+const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
   const [today] = useState(new Date());
   const { tasks, pendingTasks, loading, markTaskComplete } = useDailyTasks(user.id, today);
   const { isWorkingDay } = useWorkingDays(user.id);
@@ -120,7 +121,7 @@ const DailyView = ({ user }: DailyViewProps) => {
               </CardTitle>
               <CardDescription>Track and complete your scheduled tasks</CardDescription>
             </div>
-            <Button size="sm">
+            <Button size="sm" onClick={onCreateTask}>
               <Plus className="w-4 h-4 mr-2" />
               Add Task
             </Button>

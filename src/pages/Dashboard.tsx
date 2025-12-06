@@ -133,7 +133,7 @@ const Dashboard = () => {
       {/* Main Content */}
       <main className="container mx-auto px-4 py-8">
         {viewMode === "daily" ? (
-          <DailyView user={user} />
+          <DailyView user={user} onCreateTask={() => setShowTaskDialog(true)} />
         ) : viewMode === "monthly" ? (
           <MonthlyView user={user} />
         ) : viewMode === "tasks" ? (
