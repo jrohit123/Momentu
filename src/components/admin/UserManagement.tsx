@@ -171,6 +171,13 @@ export const UserManagement = ({ user }: UserManagementProps) => {
 
     setInviting(true);
     try {
+      // Get current user's profile for inviter name
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", user.id)
+        .single();
+
       const { data, error } = await supabase
         .from("invitations")
         .insert({
@@ -184,10 +191,30 @@ export const UserManagement = ({ user }: UserManagementProps) => {
 
       if (error) throw error;
 
-      toast({
-        title: "Invitation created!",
-        description: "Share the invitation link with the user.",
-      });
+      // Send invitation email
+      try {
+        await supabase.functions.invoke("send-invitation-email", {
+          body: {
+            email: inviteEmail.trim().toLowerCase(),
+            inviterName: profile?.full_name || "A team member",
+            organizationName: organization.name,
+            role: inviteRole,
+            invitationToken: data.token,
+            appUrl: window.location.origin,
+          },
+        });
+
+        toast({
+          title: "Invitation sent!",
+          description: `An invitation email has been sent to ${inviteEmail}`,
+        });
+      } catch (emailError) {
+        console.error("Failed to send invitation email:", emailError);
+        toast({
+          title: "Invitation created",
+          description: "Email sending failed. Share the link manually.",
+        });
+      }
 
       setInviteDialogOpen(false);
       setInviteEmail("");
