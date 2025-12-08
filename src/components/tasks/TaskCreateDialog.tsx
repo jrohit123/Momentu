@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Calendar } from "lucide-react";
+import { Loader2, Calendar, Edit } from "lucide-react";
 import { RecurrenceConfig } from "./RecurrenceConfig";
 
 const taskSchema = z.object({
@@ -24,15 +24,27 @@ const taskSchema = z.object({
 
 type TaskFormValues = z.infer<typeof taskSchema>;
 
+interface Task {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  benchmark: number | null;
+  recurrence_type: string;
+  recurrence_config: any;
+}
+
 interface TaskCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  taskToEdit?: Task | null;
 }
 
-export const TaskCreateDialog = ({ open, onOpenChange, onSuccess }: TaskCreateDialogProps) => {
+export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: TaskCreateDialogProps) => {
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+  const isEditMode = !!taskToEdit;
 
   const form = useForm<TaskFormValues>({
     resolver: zodResolver(taskSchema),
@@ -46,6 +58,29 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess }: TaskCreateDi
     },
   });
 
+  // Populate form when editing
+  useEffect(() => {
+    if (taskToEdit && open) {
+      form.reset({
+        name: taskToEdit.name,
+        description: taskToEdit.description || "",
+        category: taskToEdit.category || "",
+        benchmark: taskToEdit.benchmark || undefined,
+        recurrence_type: taskToEdit.recurrence_type as any,
+        recurrence_config: taskToEdit.recurrence_config,
+      });
+    } else if (!taskToEdit && open) {
+      form.reset({
+        name: "",
+        description: "",
+        category: "",
+        benchmark: undefined,
+        recurrence_type: "none",
+        recurrence_config: null,
+      });
+    }
+  }, [taskToEdit, open, form]);
+
   const onSubmit = async (values: TaskFormValues) => {
     setLoading(true);
     try {
@@ -54,44 +89,67 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess }: TaskCreateDi
       if (!user) {
         toast({
           title: "Error",
-          description: "You must be logged in to create tasks",
+          description: "You must be logged in to perform this action",
           variant: "destructive",
         });
         return;
       }
 
-      // Create the task
-      const { data: taskData, error: taskError } = await supabase
-        .from("tasks")
-        .insert({
-          name: values.name,
-          description: values.description || null,
-          category: values.category || null,
-          benchmark: values.benchmark || null,
-          recurrence_type: values.recurrence_type,
-          recurrence_config: values.recurrence_config || null,
-          created_by: user.id,
-        })
-        .select()
-        .single();
+      if (isEditMode && taskToEdit) {
+        // Update existing task
+        const { error: updateError } = await supabase
+          .from("tasks")
+          .update({
+            name: values.name,
+            description: values.description || null,
+            category: values.category || null,
+            benchmark: values.benchmark || null,
+            recurrence_type: values.recurrence_type,
+            recurrence_config: values.recurrence_config || null,
+          })
+          .eq("id", taskToEdit.id)
+          .eq("created_by", user.id); // Ensure user owns the task
 
-      if (taskError) throw taskError;
+        if (updateError) throw updateError;
 
-      // Auto-assign the task to the creator
-      const { error: assignError } = await supabase
-        .from("task_assignments")
-        .insert({
-          task_id: taskData.id,
-          assigned_to: user.id,
-          assigned_by: user.id,
+        toast({
+          title: "Success!",
+          description: "Task updated successfully",
         });
+      } else {
+        // Create new task
+        const { data: taskData, error: taskError } = await supabase
+          .from("tasks")
+          .insert({
+            name: values.name,
+            description: values.description || null,
+            category: values.category || null,
+            benchmark: values.benchmark || null,
+            recurrence_type: values.recurrence_type,
+            recurrence_config: values.recurrence_config || null,
+            created_by: user.id,
+          })
+          .select()
+          .single();
 
-      if (assignError) throw assignError;
+        if (taskError) throw taskError;
 
-      toast({
-        title: "Success!",
-        description: "Task created and assigned to you",
-      });
+        // Auto-assign the task to the creator
+        const { error: assignError } = await supabase
+          .from("task_assignments")
+          .insert({
+            task_id: taskData.id,
+            assigned_to: user.id,
+            assigned_by: user.id,
+          });
+
+        if (assignError) throw assignError;
+
+        toast({
+          title: "Success!",
+          description: "Task created and assigned to you",
+        });
+      }
 
       form.reset();
       onOpenChange(false);
@@ -112,11 +170,22 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess }: TaskCreateDi
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-primary" />
-            Create New Task
+            {isEditMode ? (
+              <>
+                <Edit className="w-5 h-5 text-primary" />
+                Edit Task
+              </>
+            ) : (
+              <>
+                <Calendar className="w-5 h-5 text-primary" />
+                Create New Task
+              </>
+            )}
           </DialogTitle>
           <DialogDescription>
-            Define a task with recurrence patterns and benchmarks for your team
+            {isEditMode
+              ? "Update task details, recurrence patterns, and benchmarks"
+              : "Define a task with recurrence patterns and benchmarks for your team"}
           </DialogDescription>
         </DialogHeader>
 
@@ -198,7 +267,7 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess }: TaskCreateDi
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Recurrence *</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select recurrence pattern" />
@@ -232,10 +301,10 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess }: TaskCreateDi
                 {loading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Creating...
+                    {isEditMode ? "Updating..." : "Creating..."}
                   </>
                 ) : (
-                  "Create Task"
+                  isEditMode ? "Update Task" : "Create Task"
                 )}
               </Button>
             </DialogFooter>
