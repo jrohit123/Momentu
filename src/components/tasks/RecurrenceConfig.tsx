@@ -2,6 +2,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface RecurrenceConfigProps {
   recurrenceType: string;
@@ -45,34 +46,115 @@ export const RecurrenceConfig = ({ recurrenceType, value, onChange }: Recurrence
     </div>
   );
 
-  const renderMonthlyConfig = () => (
-    <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
-      <RadioGroup
-        value={value?.monthlyType || "date"}
-        onValueChange={(monthlyType) => updateConfig({ monthlyType })}
-      >
-        <div className="flex items-center space-x-2">
-          <RadioGroupItem value="date" id="monthly-date" />
-          <Label htmlFor="monthly-date" className="flex items-center gap-2">
-            On day
-            <Input
-              type="number"
-              min="1"
-              max="31"
-              className="w-20"
-              value={value?.dayOfMonth || 1}
-              onChange={(e) => updateConfig({ dayOfMonth: parseInt(e.target.value) })}
-            />
-            of the month
-          </Label>
-        </div>
-        <div className="flex items-center space-x-2">
-          <RadioGroupItem value="weekday" id="monthly-weekday" />
-          <Label htmlFor="monthly-weekday">On the first Monday (coming soon)</Label>
-        </div>
-      </RadioGroup>
-    </div>
-  );
+  const renderMonthlyConfig = () => {
+    const monthlyType = value?.monthlyType || "date";
+    const positionOptions = [
+      { value: "1", label: "First" },
+      { value: "2", label: "Second" },
+      { value: "3", label: "Third" },
+      { value: "4", label: "Fourth" },
+      { value: "-1", label: "Last" },
+      { value: "-2", label: "Second to last" },
+    ];
+    const dayOptions = [
+      { value: "0", label: "Sunday" },
+      { value: "1", label: "Monday" },
+      { value: "2", label: "Tuesday" },
+      { value: "3", label: "Wednesday" },
+      { value: "4", label: "Thursday" },
+      { value: "5", label: "Friday" },
+      { value: "6", label: "Saturday" },
+    ];
+
+    return (
+      <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+        <RadioGroup
+          value={monthlyType}
+          onValueChange={(monthlyType) => {
+            // Reset relative pattern fields when switching to date mode
+            if (monthlyType === "date") {
+              updateConfig({ 
+                monthlyType,
+                bysetpos: undefined,
+                byweekday: undefined,
+              });
+            } else {
+              // Set defaults for relative pattern
+              updateConfig({ 
+                monthlyType,
+                bysetpos: value?.bysetpos || [1],
+                byweekday: value?.byweekday || [1], // Monday by default
+              });
+            }
+          }}
+        >
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="date" id="monthly-date" />
+            <Label htmlFor="monthly-date" className="flex items-center gap-2">
+              On day
+              <Input
+                type="number"
+                min="1"
+                max="31"
+                className="w-20"
+                value={value?.dayOfMonth || 1}
+                onChange={(e) => updateConfig({ dayOfMonth: parseInt(e.target.value) || 1 })}
+                disabled={monthlyType !== "date"}
+              />
+              of the month
+            </Label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="weekday" id="monthly-weekday" />
+            <Label htmlFor="monthly-weekday" className="flex items-center gap-2">
+              On the
+              <Select
+                value={value?.bysetpos?.[0]?.toString() || "1"}
+                onValueChange={(pos) => {
+                  updateConfig({ 
+                    bysetpos: [parseInt(pos)],
+                  });
+                }}
+                disabled={monthlyType !== "weekday"}
+              >
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {positionOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={value?.byweekday?.[0]?.toString() || "1"}
+                onValueChange={(day) => {
+                  updateConfig({ 
+                    byweekday: [parseInt(day)],
+                  });
+                }}
+                disabled={monthlyType !== "weekday"}
+              >
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {dayOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              of the month
+            </Label>
+          </div>
+        </RadioGroup>
+      </div>
+    );
+  };
 
   const renderIntervalConfig = () => (
     <div className="space-y-4 p-4 border rounded-lg bg-muted/30">

@@ -7,6 +7,7 @@ type AppRole = Database["public"]["Enums"]["app_role"];
 export const useUserRole = (userId: string) => {
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [hasSubordinates, setHasSubordinates] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -37,6 +38,15 @@ export const useUserRole = (userId: string) => {
           setRoles(data.map((r) => r.role));
         }
       }
+
+      // Check if user has any subordinates (is a manager)
+      const { data: subordinates } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("manager_id", userId)
+        .limit(1);
+
+      setHasSubordinates((subordinates?.length || 0) > 0);
       setLoading(false);
     };
 
@@ -44,8 +54,8 @@ export const useUserRole = (userId: string) => {
   }, [userId]);
 
   const isAdmin = roles.includes("admin");
-  const isManager = roles.includes("manager");
-  const isEmployee = roles.includes("employee");
+  const isManager = hasSubordinates; // User is a manager if they have subordinates
+  const isEmployee = roles.includes("user"); // Changed from "employee" to "user"
 
   return { roles, isAdmin, isManager, isEmployee, organizationId, loading };
 };

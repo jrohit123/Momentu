@@ -29,6 +29,7 @@ interface TaskAssignment {
 interface TaskCompletion {
   id: string;
   assignment_id: string;
+  scheduled_date: string;
   completion_date: string;
   status: TaskStatus;
   quantity_completed: number | null;
@@ -52,6 +53,7 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
 
   useEffect(() => {
     fetchDailyTasks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, targetDate]);
 
   const fetchDailyTasks = async () => {
@@ -89,38 +91,69 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
         return;
       }
 
-      // Fetch completions for today and past dates
+      // Fetch completions for today and past 30 days
+      // Need to check both scheduled_date (when task was due) and completion_date (when it was done)
+      // Also fetch completions that were completed today but scheduled for previous days (delayed tasks)
+      // And fetch completions from past days to check if they're truly pending
+      const pastDateStr = format(subDays(targetDate, 30), "yyyy-MM-dd");
       const { data: completions, error: compError } = await supabase
         .from("task_completions")
         .select("*")
         .in(
           "assignment_id",
           assignments.map((a) => a.id)
-        );
+        )
+        .or(`scheduled_date.gte.${pastDateStr},completion_date.gte.${pastDateStr}`);
 
       if (compError) throw compError;
 
-      const completionMap = new Map<string, TaskCompletion[]>();
+      // Build two maps:
+      // 1. By scheduled_date (for tasks scheduled for today)
+      // 2. By completion_date (for delayed tasks completed today)
+      const completionMapByScheduled = new Map<string, TaskCompletion[]>();
+      const completionMapByCompletion = new Map<string, TaskCompletion[]>();
+      
       completions?.forEach((c) => {
-        const key = `${c.assignment_id}-${c.completion_date}`;
-        if (!completionMap.has(key)) {
-          completionMap.set(key, []);
+        // Map by scheduled_date (when task was supposed to be done)
+        const scheduledDate = c.scheduled_date || c.completion_date; // Fallback for old records
+        const scheduledKey = `${c.assignment_id}-${scheduledDate}`;
+        if (!completionMapByScheduled.has(scheduledKey)) {
+          completionMapByScheduled.set(scheduledKey, []);
         }
-        completionMap.get(key)!.push(c);
+        completionMapByScheduled.get(scheduledKey)!.push(c);
+        
+        // Also map by completion_date (for delayed tasks completed today)
+        const completionKey = `${c.assignment_id}-${c.completion_date}`;
+        if (!completionMapByCompletion.has(completionKey)) {
+          completionMapByCompletion.set(completionKey, []);
+        }
+        completionMapByCompletion.get(completionKey)!.push(c);
       });
 
       // If not a working day, all tasks are NA
+      // But only if there are no completions for today (to prevent showing NA after updates)
       if (!workingDayInfo.isWorkingDay) {
-        const naTasks: DailyTask[] = (assignments as TaskAssignment[])
-          .filter((a) => taskAppliesToDate(a.task, targetDate))
-          .map((assignment) => ({
-            assignment,
-            status: "not_applicable" as TaskStatus,
-          }));
-        setTasks(naTasks);
-        setPendingTasks([]);
-        setLoading(false);
-        return;
+        // Check if any completions exist for today
+        const hasCompletionsForToday = completions?.some(c => {
+          const scheduledDate = c.scheduled_date || c.completion_date;
+          return scheduledDate === dateStr || c.completion_date === dateStr;
+        });
+        
+        // If there are completions for today, process them normally (don't mark as NA)
+        // Otherwise, mark all as NA since it's not a working day
+        if (!hasCompletionsForToday) {
+          const naTasks: DailyTask[] = (assignments as TaskAssignment[])
+            .filter((a) => taskAppliesToDate(a.task, targetDate))
+            .map((assignment) => ({
+              assignment,
+              status: "not_applicable" as TaskStatus,
+            }));
+          setTasks(naTasks);
+          setPendingTasks([]);
+          setLoading(false);
+          return;
+        }
+        // If hasCompletionsForToday is true, continue processing below (don't return)
       }
 
       // Process tasks for today
@@ -132,14 +165,70 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
         
         // Check if task applies to this date
         if (taskAppliesToDate(task, targetDate)) {
-          const key = `${assignment.id}-${dateStr}`;
-          const completion = completionMap.get(key)?.[0];
+          // Look for completion by scheduled_date (when it was supposed to be done)
+          const scheduledKey = `${assignment.id}-${dateStr}`;
+          let completion = completionMapByScheduled.get(scheduledKey)?.[0];
+
+          // Default to scheduled if no completion exists
+          // This is critical: tasks without completions should be "scheduled", not "not_applicable"
+          let status: TaskStatus = "scheduled";
+          
+          // If completion exists and has a valid status (not "not_applicable"), use its status
+          // "not_applicable" should only be set for non-working days, not for individual task completions
+          if (completion && completion.status && completion.status !== "not_applicable") {
+            status = completion.status;
+            
+            // Check if task was completed on a different date (delayed)
+            // Compare scheduled_date with completion_date
+            const scheduledDate = completion.scheduled_date || completion.completion_date;
+            const completionDate = completion.completion_date;
+            
+            // Only mark as delayed if it was scheduled for today but completed later
+            // AND the status is completed or partial
+            if (scheduledDate === dateStr && 
+                completionDate && 
+                completionDate > scheduledDate && 
+                (completion.status === "completed" || completion.status === "partial")) {
+              // Task was scheduled for this date but completed later - it's delayed
+              status = "delayed";
+            }
+          }
 
           todayTasks.push({
             assignment,
             completion,
-            status: completion?.status || "scheduled",
+            status,
           });
+        }
+        
+        // Also check for delayed tasks: tasks scheduled for previous days but completed today
+        // These should show up in today's tasks as "delayed"
+        const completionKey = `${assignment.id}-${dateStr}`;
+        const delayedCompletion = completionMapByCompletion.get(completionKey)?.[0];
+        
+        if (delayedCompletion) {
+          const scheduledDate = delayedCompletion.scheduled_date || delayedCompletion.completion_date;
+          const completionDate = delayedCompletion.completion_date;
+          
+          // If this task was scheduled for a previous day but completed today, it's delayed
+          if (scheduledDate < dateStr && completionDate === dateStr &&
+              (delayedCompletion.status === "completed" || delayedCompletion.status === "partial")) {
+            // Check if task applies to the scheduled date (not today, but we still want to show it)
+            const scheduledDateObj = new Date(scheduledDate);
+            if (taskAppliesToDate(task, scheduledDateObj)) {
+              // Check if it's not already in todayTasks (in case task also applies to today)
+              const alreadyInToday = todayTasks.some(t => t.assignment.id === assignment.id);
+              
+              if (!alreadyInToday) {
+                todayTasks.push({
+                  assignment,
+                  completion: delayedCompletion,
+                  status: "delayed",
+                  originalDate: scheduledDate,
+                });
+              }
+            }
+          }
         }
 
         // Check for pending tasks from previous working days
@@ -151,11 +240,26 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
           
           if (checkDateInfo.isWorkingDay && taskAppliesToDate(task, checkDate)) {
             const checkDateStr = format(checkDate, "yyyy-MM-dd");
-            const key = `${assignment.id}-${checkDateStr}`;
-            const completion = completionMap.get(key)?.[0];
+            const scheduledKey = `${assignment.id}-${checkDateStr}`;
+            const completion = completionMapByScheduled.get(scheduledKey)?.[0];
 
-            // If not done, partial, or marked as pending, it carries forward
-            if (!completion || completion.status === "pending" || completion.status === "not_done" || completion.status === "partial") {
+            // Check if task needs to carry forward
+            // Only tasks that are NOT completed should be in pending
+            // Delayed tasks that are completed should show up in today's tasks, not pending
+            const scheduledDate = completion?.scheduled_date || completion?.completion_date;
+            const completionDate = completion?.completion_date;
+            
+            // Check if task was completed (even if delayed) - these should NOT be in pending
+            // A task is considered completed if:
+            // 1. It has status "completed", OR
+            // 2. It has status "partial" with a completion_date (even if delayed)
+            const isCompleted = completion && 
+                               (completion.status === "completed" || 
+                                completion.status === "partial");
+            
+            // Only add to pending if there's no completion record OR the task is explicitly not done
+            // Do NOT add if task is completed (even if delayed)
+            if (!isCompleted && (!completion || completion.status === "not_done")) {
               const existingPending = pending.find(
                 (p) => p.assignment.id === assignment.id && p.originalDate === checkDateStr
               );
@@ -197,14 +301,17 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
     originalDate?: string
   ) => {
     try {
-      const completionDate = originalDate || format(targetDate, "yyyy-MM-dd");
+      // scheduledDate is when the task was supposed to be done (original due date)
+      const scheduledDate = originalDate || format(targetDate, "yyyy-MM-dd");
+      // completionDate is when it's actually being completed (today)
+      const completionDate = format(targetDate, "yyyy-MM-dd");
 
-      // Check if completion already exists
+      // Check if completion already exists for this scheduled date
       const { data: existing } = await supabase
         .from("task_completions")
         .select("id")
         .eq("assignment_id", assignmentId)
-        .eq("completion_date", completionDate)
+        .eq("scheduled_date", scheduledDate)
         .maybeSingle();
 
       if (existing) {
@@ -212,6 +319,7 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
         const { error } = await supabase
           .from("task_completions")
           .update({
+            completion_date: completionDate,
             status,
             quantity_completed: quantityCompleted,
             notes,
@@ -226,6 +334,7 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
           .from("task_completions")
           .insert({
             assignment_id: assignmentId,
+            scheduled_date: scheduledDate,
             completion_date: completionDate,
             status,
             quantity_completed: quantityCompleted,

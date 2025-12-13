@@ -8,7 +8,9 @@ import { PublicHolidaysList } from "./PublicHolidaysList";
 import { WeeklyOffsList } from "./WeeklyOffsList";
 import { PersonalHolidaysList } from "./PersonalHolidaysList";
 import { TeamHolidayRequests } from "./TeamHolidayRequests";
-import { Calendar, Sun, Briefcase, Users } from "lucide-react";
+import { PersonalWeeklyOffsSettings } from "@/components/settings/PersonalWeeklyOffsSettings";
+import { Calendar, Sun, Briefcase, Users, Settings } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface HolidayManagementProps {
   user: User;
@@ -28,7 +30,10 @@ export const HolidayManagement = ({ user }: HolidayManagementProps) => {
       </div>
 
       <Tabs defaultValue="personal" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
+        <TabsList className={cn(
+          "grid w-full lg:w-auto lg:inline-grid",
+          isAdmin ? "grid-cols-5" : "grid-cols-4"
+        )}>
           <TabsTrigger value="personal" className="gap-2">
             <Briefcase className="w-4 h-4" />
             <span className="hidden sm:inline">My Leave</span>
@@ -43,9 +48,15 @@ export const HolidayManagement = ({ user }: HolidayManagementProps) => {
             <Calendar className="w-4 h-4" />
             <span className="hidden sm:inline">Public</span>
           </TabsTrigger>
-          <TabsTrigger value="weekly" className="gap-2">
-            <Sun className="w-4 h-4" />
-            <span className="hidden sm:inline">Weekly Offs</span>
+          {isAdmin && (
+            <TabsTrigger value="weekly" className="gap-2">
+              <Sun className="w-4 h-4" />
+              <span className="hidden sm:inline">Org Weekly Offs</span>
+            </TabsTrigger>
+          )}
+          <TabsTrigger value="my-weekly-offs" className="gap-2">
+            <Settings className="w-4 h-4" />
+            <span className="hidden sm:inline">My Weekly Offs</span>
           </TabsTrigger>
         </TabsList>
 
@@ -78,14 +89,20 @@ export const HolidayManagement = ({ user }: HolidayManagementProps) => {
           />
         </TabsContent>
 
-        <TabsContent value="weekly">
-          <WeeklyOffsList
-            weeklyOffs={holidays.weeklyOffs}
-            loading={holidays.loading}
-            isAdmin={isAdmin}
-            onAdd={holidays.addWeeklyOff}
-            onDelete={holidays.deleteWeeklyOff}
-          />
+        {isAdmin && (
+          <TabsContent value="weekly">
+            <WeeklyOffsList
+              weeklyOffs={holidays.weeklyOffs}
+              loading={holidays.loading}
+              isAdmin={isAdmin}
+              onAdd={holidays.addWeeklyOff}
+              onDelete={holidays.deleteWeeklyOff}
+            />
+          </TabsContent>
+        )}
+
+        <TabsContent value="my-weekly-offs">
+          <PersonalWeeklyOffsSettings user={user} />
         </TabsContent>
       </Tabs>
     </div>

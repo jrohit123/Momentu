@@ -1,12 +1,34 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { User } from "@supabase/supabase-js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { ChevronLeft, ChevronRight, Download, FileSpreadsheet, FileText, Search, X } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useMonthlyTasks } from "@/hooks/useMonthlyTasks";
 import { useWorkingDays } from "@/hooks/useWorkingDays";
+import { useSubordinates } from "@/hooks/useSubordinates";
+import { useTeamCompletionStats } from "@/hooks/useTeamCompletionStats";
+import { exportMonthlyToExcel, exportMonthlyToCSV } from "@/lib/exportUtils";
+import { useToast } from "@/hooks/use-toast";
+import { TaskCompletionDialog } from "@/components/tasks/TaskCompletionDialog";
+import { TaskHistoryDialog } from "@/components/dashboard/TaskHistoryDialog";
+import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
@@ -17,12 +39,180 @@ interface MonthlyViewProps {
 
 const MonthlyView = ({ user }: MonthlyViewProps) => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const { tasks, loading } = useMonthlyTasks(user.id, currentDate);
-  const { isWorkingDay } = useWorkingDays(user.id);
+  const { subordinates, loading: subordinatesLoading } = useSubordinates(user.id);
+  const [selectedSubordinateId, setSelectedSubordinateId] = useState<string>("self");
+  const targetUserId = selectedSubordinateId === "self" ? undefined : selectedSubordinateId;
+  const { tasks, loading, refresh } = useMonthlyTasks(user.id, currentDate, targetUserId);
+  const effectiveUserId = targetUserId || user.id;
+  const { isWorkingDay } = useWorkingDays(effectiveUserId);
+  const { teamStats } = useTeamCompletionStats(user.id, currentDate);
+  const { toast } = useToast();
+  
+  // State for task completion dialog
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<{
+    assignmentId: string;
+    taskName: string;
+    benchmark: number | null;
+    description: string | null;
+    date: Date;
+  } | null>(null);
+  
+  // State for task history dialog
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [selectedTaskForHistory, setSelectedTaskForHistory] = useState<{
+    assignmentId: string;
+    taskName: string;
+    taskDescription: string | null;
+    benchmark: number | null;
+  } | null>(null);
+  
+  // Function to mark task complete for a specific date
+  const handleTaskStatusUpdate = async (
+    assignmentId: string,
+    status: TaskStatus,
+    scheduledDate: Date,
+    quantityCompleted?: number,
+    notes?: string
+  ) => {
+    try {
+      const scheduledDateStr = format(scheduledDate, "yyyy-MM-dd");
+      const completionDateStr = format(new Date(), "yyyy-MM-dd"); // Always use today as completion date
+      
+      // Check if completion already exists for this scheduled date
+      const { data: existing } = await supabase
+        .from("task_completions")
+        .select("id")
+        .eq("assignment_id", assignmentId)
+        .eq("scheduled_date", scheduledDateStr)
+        .maybeSingle();
+      
+      if (existing) {
+        // Update existing
+        const { error } = await supabase
+          .from("task_completions")
+          .update({
+            completion_date: completionDateStr,
+            status,
+            quantity_completed: quantityCompleted,
+            notes,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+        
+        if (error) throw error;
+      } else {
+        // Create new
+        const { error } = await supabase
+          .from("task_completions")
+          .insert({
+            assignment_id: assignmentId,
+            scheduled_date: scheduledDateStr,
+            completion_date: completionDateStr,
+            status,
+            quantity_completed: quantityCompleted,
+            notes,
+          });
+        
+        if (error) throw error;
+      }
+      
+      toast({
+        title: "Success",
+        description: "Task status updated successfully",
+      });
+      
+      // Refresh the monthly view
+      await refresh();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update task status",
+        variant: "destructive",
+      });
+      throw error;
+    }
+  };
+  
+  // Filter states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  
+  // Get selected user's completion percentage
+  const selectedUserStats = useMemo(() => {
+    if (selectedSubordinateId === "self") {
+      // Calculate own stats
+      const total = tasks.length;
+      const completed = tasks.reduce((count, taskData) => {
+        let taskCompleted = 0;
+        taskData.dailyStatuses.forEach((status) => {
+          if (status === "completed") taskCompleted++;
+        });
+        return count + (taskCompleted > 0 ? 1 : 0);
+      }, 0);
+      return {
+        completionPercentage: total > 0 ? Math.round((completed / total) * 100) : 0,
+        fullName: "Your",
+      };
+    } else {
+      const subordinate = subordinates.find((s) => s.id === selectedSubordinateId);
+      const stats = teamStats.find((s) => s.userId === selectedSubordinateId);
+      return {
+        completionPercentage: stats?.completionPercentage || 0,
+        fullName: subordinate?.full_name || "User",
+      };
+    }
+  }, [selectedSubordinateId, subordinates, teamStats, tasks]);
   
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);
   const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
+  const monthName = format(currentDate, "MMMM yyyy");
+
+  // Get unique categories from tasks
+  const categories = useMemo(() => {
+    const uniqueCategories = new Set<string>();
+    tasks.forEach((taskData) => {
+      const category = taskData.assignment.task.category;
+      if (category) {
+        uniqueCategories.add(category);
+      }
+    });
+    return Array.from(uniqueCategories).sort();
+  }, [tasks]);
+
+  // Filter tasks based on search, category, and status
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((taskData) => {
+      const task = taskData.assignment.task;
+      
+      // Search filter - match task name
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        if (!task.name.toLowerCase().includes(query)) {
+          return false;
+        }
+      }
+      
+      // Category filter
+      if (categoryFilter !== "all") {
+        if (task.category !== categoryFilter) {
+          return false;
+        }
+      }
+      
+      // Status filter - check if task has the selected status on any day
+      if (statusFilter !== "all") {
+        const hasStatus = Array.from(taskData.dailyStatuses.values()).includes(statusFilter as TaskStatus);
+        if (!hasStatus) {
+          return false;
+        }
+      }
+      
+      return true;
+    });
+  }, [tasks, searchQuery, categoryFilter, statusFilter]);
 
   const previousMonth = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
@@ -49,6 +239,67 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     }
   };
 
+  const handleExportExcel = async () => {
+    try {
+      const tasksToExport = filteredTasks.length > 0 ? filteredTasks : tasks;
+      if (tasksToExport.length === 0) {
+        toast({
+          title: "No data to export",
+          description: "There are no tasks to export for this month.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      await exportMonthlyToExcel(tasksToExport, daysInMonth, monthName, isWorkingDay);
+      toast({
+        title: "Export successful",
+        description: `Monthly tasks exported to Excel for ${monthName}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export failed",
+        description: error.message || "An error occurred while exporting",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleExportCSV = () => {
+    try {
+      const tasksToExport = filteredTasks.length > 0 ? filteredTasks : tasks;
+      if (tasksToExport.length === 0) {
+        toast({
+          title: "No data to export",
+          description: "There are no tasks to export for this month.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      exportMonthlyToCSV(tasksToExport, daysInMonth, monthName, isWorkingDay);
+      toast({
+        title: "Export successful",
+        description: `Monthly tasks exported to CSV for ${monthName}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export failed",
+        description: error.message || "An error occurred while exporting",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setCategoryFilter("all");
+    setStatusFilter("all");
+    setSelectedSubordinateId("self");
+  };
+
+  const hasActiveFilters = searchQuery.trim() || categoryFilter !== "all" || statusFilter !== "all" || selectedSubordinateId !== "self";
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Month Navigation */}
@@ -58,8 +309,17 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
             <div>
               <CardTitle className="font-heading text-2xl">
                 {format(currentDate, "MMMM yyyy")}
+                {selectedSubordinateId !== "self" && (
+                  <span className="text-lg text-muted-foreground ml-2">
+                    - {selectedUserStats.fullName} ({selectedUserStats.completionPercentage}%)
+                  </span>
+                )}
               </CardTitle>
-              <CardDescription>Monthly task completion matrix</CardDescription>
+              <CardDescription>
+                {selectedSubordinateId === "self" 
+                  ? "Monthly task completion matrix" 
+                  : `Viewing ${selectedUserStats.fullName.toLowerCase()} tasks`}
+              </CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={previousMonth}>
@@ -71,14 +331,132 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
               <Button variant="outline" size="sm" onClick={nextMonth}>
                 <ChevronRight className="w-4 h-4" />
               </Button>
-              <Button size="sm" className="ml-4">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" className="ml-4" disabled={loading || tasks.length === 0}>
                 <Download className="w-4 h-4 mr-2" />
                 Export
               </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleExportExcel}>
+                    <FileSpreadsheet className="w-4 h-4 mr-2" />
+                    Export to Excel
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleExportCSV}>
+                    <FileText className="w-4 h-4 mr-2" />
+                    Export to CSV
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </CardHeader>
         <CardContent>
+          {/* Filters */}
+          {!loading && (
+            <div className="mb-6 flex flex-wrap items-center gap-4">
+              {/* Subordinate Filter - Only show if user has subordinates */}
+              {subordinates.length > 0 && (
+                <Select value={selectedSubordinateId} onValueChange={setSelectedSubordinateId}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="View Tasks For" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="self">Myself</SelectItem>
+                    {subordinates.map((subordinate) => {
+                      const stats = teamStats.find((s) => s.userId === subordinate.id);
+                      const percentage = stats?.completionPercentage || 0;
+                      return (
+                        <SelectItem key={subordinate.id} value={subordinate.id}>
+                          {subordinate.full_name} ({percentage}%)
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {/* Search Input */}
+              {tasks.length > 0 && (
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                  <Input
+                    type="text"
+                    placeholder="Search tasks..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 pr-10"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Category Filter */}
+              {tasks.length > 0 && (
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {categories.map((category) => (
+                      <SelectItem key={category} value={category}>
+                        {category}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {/* Status Filter */}
+              {tasks.length > 0 && (
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="All Statuses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="partial">Partial</SelectItem>
+                    <SelectItem value="not_done">Not Done</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="delayed">Delayed</SelectItem>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
+                    <SelectItem value="not_applicable">Not Applicable</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+
+              {/* Clear Filters Button */}
+              {hasActiveFilters && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={clearFilters}
+                  className="flex items-center gap-2"
+                >
+                  <X className="w-4 h-4" />
+                  Clear Filters
+                </Button>
+              )}
+
+              {/* Results Count */}
+              {hasActiveFilters && tasks.length > 0 && (
+                <div className="text-sm text-muted-foreground">
+                  Showing {filteredTasks.length} of {tasks.length} tasks
+                </div>
+              )}
+            </div>
+          )}
+
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-muted-foreground">Loading tasks...</div>
@@ -86,6 +464,10 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
           ) : tasks.length === 0 ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-muted-foreground">No tasks assigned yet</div>
+            </div>
+          ) : filteredTasks.length === 0 ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-muted-foreground">No tasks match your filters</div>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -116,12 +498,27 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {tasks.map((taskData) => {
+                  {filteredTasks.map((taskData) => {
                     const task = taskData.assignment.task;
                     return (
                       <tr key={taskData.assignment.id} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="sticky left-0 z-10 bg-card px-4 py-3 font-medium">
-                          {task.name}
+                          <button
+                            onClick={() => {
+                              setSelectedTaskForHistory({
+                                assignmentId: taskData.assignment.id,
+                                taskName: task.name,
+                                taskDescription: task.description,
+                                benchmark: task.benchmark,
+                              });
+                              setHistoryDialogOpen(true);
+                            }}
+                            className="hover:underline text-left flex items-center gap-2 group"
+                            title="Click to view daily task history"
+                          >
+                            {task.name}
+                            <FileText className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </button>
                         </td>
                         <td className="px-2 py-3 text-center text-sm text-muted-foreground">
                           {getFrequencyLabel(task.recurrence_type)}
@@ -132,20 +529,43 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
                         {daysInMonth.map((day) => {
                           const dateStr = format(day, "yyyy-MM-dd");
                           const status = taskData.dailyStatuses.get(dateStr) || "not_applicable";
+                          const notes = taskData.dailyNotes.get(dateStr) || null;
+                          const quantity = taskData.dailyQuantities.get(dateStr) || null;
+                          const benchmark = task.benchmark || null;
+                          const completionDate = taskData.dailyCompletionDates.get(dateStr) || null;
                           const workingDayInfo = isWorkingDay(day);
+                          const isTodayDate = isToday(day);
+                          
+                          // Only allow editing for today's date
+                          const canEdit = isTodayDate && (status === "scheduled" || status === "pending" || status === "not_applicable" || status === "completed" || status === "partial" || status === "not_done" || status === "delayed");
                           
                           return (
                             <td
                               key={day.toString()}
                               className={cn(
                                 "px-2 py-3 text-center",
-                                isToday(day) && "bg-primary/10",
+                                isTodayDate && "bg-primary/10",
                                 !workingDayInfo.isWorkingDay && "bg-holiday-weekly-off/50"
                               )}
                             >
                               <StatusIndicator
                                 status={status}
                                 isWeeklyOff={!workingDayInfo.isWorkingDay}
+                                notes={notes}
+                                quantity={quantity}
+                                benchmark={benchmark}
+                                completionDate={completionDate}
+                                onClick={canEdit ? () => {
+                                  setSelectedTask({
+                                    assignmentId: taskData.assignment.id,
+                                    taskName: task.name,
+                                    benchmark: task.benchmark,
+                                    description: task.description,
+                                    date: day,
+                                  });
+                                  setDialogOpen(true);
+                                } : undefined}
+                                canEdit={canEdit}
                               />
                             </td>
                           );
@@ -167,6 +587,12 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
               <span>Completed</span>
             </div>
             <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded bg-warning flex items-center justify-center text-white font-bold">
+                ◐ 
+              </div>
+              <span>Partial</span>
+            </div>
+            <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded bg-destructive flex items-center justify-center text-white font-bold">
                 ✗
               </div>
@@ -185,12 +611,57 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
               <span>Not Applicable</span>
             </div>
             <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded bg-orange-500 flex items-center justify-center text-white font-bold">
+                ⏱
+              </div>
+              <span>Delayed</span>
+            </div>
+            <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded bg-holiday-weekly-off border border-border"></div>
-              <span>Weekly Off</span>
+              <span>Weekly Off/Holiday (WO/H)</span>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Task Completion Dialog */}
+      {selectedTask && (
+        <TaskCompletionDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          taskName={selectedTask.taskName}
+          benchmark={selectedTask.benchmark}
+          description={selectedTask.description}
+          onSubmit={async (status, quantity, notes) => {
+            try {
+              await handleTaskStatusUpdate(
+                selectedTask.assignmentId,
+                status,
+                selectedTask.date,
+                quantity,
+                notes
+              );
+              
+              setDialogOpen(false);
+              setSelectedTask(null);
+            } catch (error) {
+              // Error is already handled in handleTaskStatusUpdate
+            }
+          }}
+        />
+      )}
+
+      {/* Task History Dialog */}
+      {selectedTaskForHistory && (
+        <TaskHistoryDialog
+          open={historyDialogOpen}
+          onOpenChange={setHistoryDialogOpen}
+          assignmentId={selectedTaskForHistory.assignmentId}
+          taskName={selectedTaskForHistory.taskName}
+          taskDescription={selectedTaskForHistory.taskDescription}
+          benchmark={selectedTaskForHistory.benchmark}
+        />
+      )}
     </div>
   );
 };
@@ -198,10 +669,19 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
 interface StatusIndicatorProps {
   status: TaskStatus;
   isWeeklyOff: boolean;
+  notes: string | null;
+  quantity: number | null;
+  completionDate: string | null;
+  benchmark: number | null;
+  onClick?: () => void;
+  canEdit?: boolean;
 }
 
-const StatusIndicator = ({ status, isWeeklyOff }: StatusIndicatorProps) => {
-  if (isWeeklyOff) {
+const StatusIndicator = ({ status, isWeeklyOff, notes, quantity, benchmark, completionDate, onClick, canEdit }: StatusIndicatorProps) => {
+  // If it's a weekly off but there's a completion status (task was done on weekly off),
+  // show the status instead of "-"
+  // Only show "-" if it's a weekly off AND there's no completion (status is "not_applicable" or "scheduled")
+  if (isWeeklyOff && (status === "not_applicable" || status === "scheduled")) {
     return (
       <div className="w-8 h-8 mx-auto rounded flex items-center justify-center text-xs text-muted-foreground">
         -
@@ -216,21 +696,53 @@ const StatusIndicator = ({ status, isWeeklyOff }: StatusIndicatorProps) => {
     pending: { bg: "bg-warning", icon: "!", text: "text-white" },
     not_applicable: { bg: "bg-status-na", icon: "NA", text: "text-white text-[10px]" },
     scheduled: { bg: "bg-muted", icon: "○", text: "text-muted-foreground" },
+    delayed: { bg: "bg-orange-500", icon: "⏱", text: "text-white" },
   };
 
   const config = statusConfig[status];
 
-  return (
+  const statusIndicator = (
     <div
+      onClick={canEdit && onClick ? onClick : undefined}
       className={cn(
-        "w-8 h-8 mx-auto rounded flex items-center justify-center font-bold transition-all hover:scale-110 cursor-pointer",
+        "w-8 h-8 mx-auto rounded flex items-center justify-center font-bold transition-all",
         config.bg,
-        config.text
+        config.text,
+        canEdit && onClick && "hover:scale-110 cursor-pointer",
+        !canEdit || !onClick ? "cursor-default" : ""
       )}
+      title={canEdit && onClick ? "Click to update status" : undefined}
     >
       {config.icon}
     </div>
   );
+
+  // Show tooltip with notes if available
+  if (notes && notes.trim()) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {statusIndicator}
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-xs">
+            <div className="space-y-1">              
+              {completionDate && (
+                <p className="font-semibold text-sm">{format(new Date(completionDate), "MMM dd, yyyy")}</p>
+              )}
+              {status === "partial" && quantity !== null && benchmark !== null ? (
+                <p className="text-sm whitespace-pre-wrap">Completed: {quantity} (of {benchmark}). {notes}</p>
+              ) : (
+                <p className="text-sm whitespace-pre-wrap">{notes}</p>
+              )}
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  return statusIndicator;
 };
 
 export default MonthlyView;

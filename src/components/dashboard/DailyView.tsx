@@ -215,6 +215,8 @@ const TaskItem = ({ dailyTask, onStatusChange }: TaskItemProps) => {
         return <Clock className="w-5 h-5 text-warning flex-shrink-0" />;
       case "pending":
         return <Clock className="w-5 h-5 text-warning flex-shrink-0" />;
+      case "delayed":
+        return <Clock className="w-5 h-5 text-orange-500 flex-shrink-0" />;
       case "not_done":
         return <XCircle className="w-5 h-5 text-destructive flex-shrink-0" />;
       case "not_applicable":
@@ -236,6 +238,12 @@ const TaskItem = ({ dailyTask, onStatusChange }: TaskItemProps) => {
         return (
           <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30">
             Partial ({dailyTask.completion?.quantity_completed || 0})
+          </Badge>
+        );
+      case "delayed":
+        return (
+          <Badge variant="outline" className="bg-orange-500/10 text-orange-600 border-orange-500/30">
+            Delayed
           </Badge>
         );
       case "not_done":
@@ -293,6 +301,7 @@ const TaskItem = ({ dailyTask, onStatusChange }: TaskItemProps) => {
               onOpenChange={setDialogOpen}
               taskName={task.name}
               benchmark={task.benchmark}
+              description={task.description}
               onSubmit={(status, quantity, notes) => {
                 onStatusChange(status, quantity, notes);
               }}

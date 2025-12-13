@@ -14,6 +14,7 @@ interface TaskCompletionDialogProps {
   onOpenChange: (open: boolean) => void;
   taskName: string;
   benchmark: number | null;
+  description?: string | null;
   onSubmit: (status: TaskStatus, quantity?: number, notes?: string) => void;
 }
 
@@ -22,9 +23,10 @@ export const TaskCompletionDialog = ({
   onOpenChange,
   taskName,
   benchmark,
+  description,
   onSubmit,
 }: TaskCompletionDialogProps) => {
-  const [quantity, setQuantity] = useState<string>(benchmark?.toString() || "");
+  const [quantity, setQuantity] = useState<string>("1");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
 
@@ -47,7 +49,7 @@ export const TaskCompletionDialog = ({
   // Reset form when dialog opens
   useEffect(() => {
     if (open) {
-      setQuantity(benchmark?.toString() || "");
+      setQuantity("1");
       setNotes("");
       setError("");
     }
@@ -69,7 +71,7 @@ export const TaskCompletionDialog = ({
     onSubmit(derivedStatus, quantityNum || undefined, notes.trim() || undefined);
     
     // Reset form
-    setQuantity(benchmark?.toString() || "");
+    setQuantity("1");
     setNotes("");
     setError("");
     onOpenChange(false);
@@ -97,6 +99,18 @@ export const TaskCompletionDialog = ({
             Update the completion status for: <span className="font-medium text-foreground">{taskName}</span>
           </DialogDescription>
         </DialogHeader>
+
+        {/* Task Description - Read Only */}
+        {description && (
+          <div className="space-y-2">
+            <Label>Task Description</Label>
+            <Textarea
+              value={description}
+              readOnly
+              className="min-h-[80px] bg-muted cursor-not-allowed resize-none"
+            />
+          </div>
+        )}
 
         <div className="space-y-4 py-4">
           {/* Quantity Completed */}
@@ -131,7 +145,7 @@ export const TaskCompletionDialog = ({
               {getStatusBadge()}
               {hasBenchmark && quantityNum > 0 && quantityNum < benchmark && (
                 <span className="text-xs text-muted-foreground">
-                  ({quantityNum}/{benchmark} = {Math.round((quantityNum / benchmark) * 100)}%)
+                  ({quantityNum}/{benchmark} = {Math.floor((quantityNum / benchmark) * 100)}%)
                 </span>
               )}
             </div>

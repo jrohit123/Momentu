@@ -21,13 +21,24 @@ export const useWorkingDays = (userId: string) => {
   useEffect(() => {
     const fetchWorkingDayData = async () => {
       try {
-        // Fetch weekly offs
-        const { data: weeklyOffData } = await supabase
-          .from("weekly_offs")
-          .select("day_of_week");
+        // First, try to fetch user-specific weekly offs
+        const { data: userWeeklyOffData } = await supabase
+          .from("user_weekly_offs")
+          .select("day_of_week")
+          .eq("user_id", userId);
         
-        if (weeklyOffData) {
-          setWeeklyOffs(weeklyOffData.map(w => w.day_of_week));
+        if (userWeeklyOffData && userWeeklyOffData.length > 0) {
+          // User has specific weekly offs set
+          setWeeklyOffs(userWeeklyOffData.map(w => w.day_of_week));
+        } else {
+          // Fall back to organization-wide weekly offs
+          const { data: weeklyOffData } = await supabase
+            .from("weekly_offs")
+            .select("day_of_week");
+          
+          if (weeklyOffData) {
+            setWeeklyOffs(weeklyOffData.map(w => w.day_of_week));
+          }
         }
 
         // Fetch public holidays

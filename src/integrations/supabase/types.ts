@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       invitations: {
@@ -297,6 +272,7 @@ export type Database = {
           id: string
           notes: string | null
           quantity_completed: number | null
+          scheduled_date: string
           status: Database["public"]["Enums"]["task_status"]
           updated_at: string
         }
@@ -307,6 +283,7 @@ export type Database = {
           id?: string
           notes?: string | null
           quantity_completed?: number | null
+          scheduled_date: string
           status: Database["public"]["Enums"]["task_status"]
           updated_at?: string
         }
@@ -317,6 +294,7 @@ export type Database = {
           id?: string
           notes?: string | null
           quantity_completed?: number | null
+          scheduled_date?: string
           status?: Database["public"]["Enums"]["task_status"]
           updated_at?: string
         }
@@ -416,6 +394,35 @@ export type Database = {
           },
         ]
       }
+      user_weekly_offs: {
+        Row: {
+          created_at: string
+          day_of_week: Database["public"]["Enums"]["day_of_week"]
+          id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          day_of_week: Database["public"]["Enums"]["day_of_week"]
+          id?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          day_of_week?: Database["public"]["Enums"]["day_of_week"]
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_weekly_offs_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       weekly_offs: {
         Row: {
           created_at: string
@@ -442,6 +449,12 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_subordinates: {
+        Args: { _user_id: string }
+        Returns: {
+          subordinate_id: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -449,10 +462,14 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_manager_of: {
+        Args: { _manager_id: string; _subordinate_id: string }
+        Returns: boolean
+      }
       same_organization: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
-      app_role: "employee" | "manager" | "admin"
+      app_role: "employee" | "manager" | "admin" | "user"
       day_of_week:
         | "monday"
         | "tuesday"
@@ -468,6 +485,7 @@ export type Database = {
         | "pending"
         | "not_applicable"
         | "scheduled"
+        | "delayed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -593,12 +611,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
-      app_role: ["employee", "manager", "admin"],
+      app_role: ["employee", "manager", "admin", "user"],
       day_of_week: [
         "monday",
         "tuesday",
@@ -615,6 +630,7 @@ export const Constants = {
         "pending",
         "not_applicable",
         "scheduled",
+        "delayed",
       ],
     },
   },

@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, UserPlus, Users, Building2, Mail, Clock, X, Copy, Check, Network } from "lucide-react";
+import { Shield, UserPlus, Users, Building2, Mail, Clock, X, Copy, Check, Network, Calendar } from "lucide-react";
 import { TeamHierarchy } from "./TeamHierarchy";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -48,7 +48,7 @@ export const UserManagement = ({ user }: UserManagementProps) => {
   const [loading, setLoading] = useState(true);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<AppRole>("employee");
+  const [inviteRole, setInviteRole] = useState<AppRole>("user");
   const [inviting, setInviting] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const { toast } = useToast();
@@ -148,26 +148,6 @@ export const UserManagement = ({ user }: UserManagementProps) => {
     }
   };
 
-  const handleManagerChange = async (userId: string, managerId: string | null) => {
-    try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({ manager_id: managerId === "none" ? null : managerId })
-        .eq("id", userId);
-
-      if (error) throw error;
-
-      toast({ title: "Manager updated successfully" });
-      fetchUsersAndOrg();
-    } catch (error: any) {
-      toast({
-        title: "Error updating manager",
-        description: error.message,
-        variant: "destructive",
-      });
-    }
-  };
-
   const handleInvite = async () => {
     if (!organization || !inviteEmail.trim()) return;
 
@@ -220,7 +200,7 @@ export const UserManagement = ({ user }: UserManagementProps) => {
 
       setInviteDialogOpen(false);
       setInviteEmail("");
-      setInviteRole("employee");
+      setInviteRole("user");
       fetchUsersAndOrg();
     } catch (error: any) {
       toast({
@@ -261,12 +241,75 @@ export const UserManagement = ({ user }: UserManagementProps) => {
     toast({ title: "Link copied to clipboard" });
   };
 
+  const handleManagerChange = async (userId: string, managerId: string) => {
+    try {
+      const newManagerId = managerId === "none" ? null : managerId;
+      
+      // Prevent circular references (user can't be their own manager)
+      if (newManagerId === userId) {
+        toast({
+          title: "Error",
+          description: "A user cannot be their own manager",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Check for circular references in the hierarchy
+      if (newManagerId) {
+        const { data: managerProfile } = await supabase
+          .from("profiles")
+          .select("manager_id")
+          .eq("id", newManagerId)
+          .single();
+
+        // Check if the new manager is a subordinate of the user being assigned
+        let currentManagerId = managerProfile?.manager_id;
+        while (currentManagerId) {
+          if (currentManagerId === userId) {
+            toast({
+              title: "Error",
+              description: "Cannot create circular reporting structure",
+              variant: "destructive",
+            });
+            return;
+          }
+          const { data: nextManager } = await supabase
+            .from("profiles")
+            .select("manager_id")
+            .eq("id", currentManagerId)
+            .single();
+          currentManagerId = nextManager?.manager_id || null;
+        }
+      }
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({ manager_id: newManagerId })
+        .eq("id", userId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Manager assignment updated",
+      });
+      fetchUsersAndOrg();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update manager assignment",
+        variant: "destructive",
+      });
+    }
+  };
+
   const getRoleBadgeVariant = (role: AppRole) => {
     switch (role) {
       case "admin":
         return "default";
-      case "manager":
-        return "secondary";
+      case "user":
+        return "outline";
       default:
         return "outline";
     }
@@ -325,6 +368,10 @@ export const UserManagement = ({ user }: UserManagementProps) => {
             <Network className="w-4 h-4" />
             Hierarchy
           </TabsTrigger>
+          <TabsTrigger value="weekly-offs" className="flex items-center gap-2">
+            <Calendar className="w-4 h-4" />
+            Weekly Offs
+          </TabsTrigger>
           <TabsTrigger value="invitations" className="flex items-center gap-2">
             <UserPlus className="w-4 h-4" />
             Invitations
@@ -356,8 +403,10 @@ export const UserManagement = ({ user }: UserManagementProps) => {
                 </TableHeader>
                 <TableBody>
                   {users.map((u) => {
-                    const managers = users.filter(
-                      (m) => m.id !== u.id && m.roles.includes("manager")
+                    // Any user can be a manager (if they have subordinates)
+                    // Filter out the current user and admins from manager selection
+                    const availableManagers = users.filter(
+                      (m) => m.id !== u.id && !m.roles.includes("admin")
                     );
                     return (
                       <TableRow key={u.id}>
@@ -372,7 +421,7 @@ export const UserManagement = ({ user }: UserManagementProps) => {
                         <TableCell className="text-muted-foreground">{u.email}</TableCell>
                         <TableCell>
                           <Select
-                            value={u.roles[0] || "employee"}
+                            value={u.roles[0] || "user"}
                             onValueChange={(value) => handleRoleChange(u.id, value as AppRole)}
                             disabled={u.id === user.id}
                           >
@@ -381,8 +430,7 @@ export const UserManagement = ({ user }: UserManagementProps) => {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="admin">Admin</SelectItem>
-                              <SelectItem value="manager">Manager</SelectItem>
-                              <SelectItem value="employee">Employee</SelectItem>
+                              <SelectItem value="user">User</SelectItem>
                             </SelectContent>
                           </Select>
                         </TableCell>
@@ -390,14 +438,14 @@ export const UserManagement = ({ user }: UserManagementProps) => {
                           <Select
                             value={u.manager_id || "none"}
                             onValueChange={(value) => handleManagerChange(u.id, value)}
-                            disabled={u.roles.includes("admin")}
+                            disabled={u.roles.includes("admin") || u.id === user.id}
                           >
                             <SelectTrigger className="w-36">
                               <SelectValue placeholder="No manager" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">No manager</SelectItem>
-                              {managers.map((m) => (
+                              {availableManagers.map((m) => (
                                 <SelectItem key={m.id} value={m.id}>
                                   {m.full_name}
                                 </SelectItem>
@@ -426,6 +474,11 @@ export const UserManagement = ({ user }: UserManagementProps) => {
         {/* Hierarchy Tab */}
         <TabsContent value="hierarchy">
           <TeamHierarchy user={user} />
+        </TabsContent>
+
+        {/* Weekly Offs Tab */}
+        <TabsContent value="weekly-offs">
+          <UserWeeklyOffs user={user} />
         </TabsContent>
 
         {/* Invitations Tab */}
@@ -473,8 +526,7 @@ export const UserManagement = ({ user }: UserManagementProps) => {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="employee">Employee</SelectItem>
-                          <SelectItem value="manager">Manager</SelectItem>
+                          <SelectItem value="user">User</SelectItem>
                           <SelectItem value="admin">Admin</SelectItem>
                         </SelectContent>
                       </Select>
