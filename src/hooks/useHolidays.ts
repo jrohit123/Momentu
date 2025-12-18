@@ -78,7 +78,7 @@ export const useHolidays = (userId: string) => {
         .from("personal_holidays")
         .select(`
           *,
-          profile:profiles!personal_holidays_user_id_fkey (
+          profile:users!personal_holidays_user_id_fkey (
             full_name,
             email
           )

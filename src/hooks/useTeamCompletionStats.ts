@@ -27,7 +27,7 @@ export const useTeamCompletionStats = (userId: string, currentMonth: Date) => {
       
       // Fetch subordinates
       const { data: subordinates, error: subError } = await supabase
-        .from("profiles")
+        .from("users")
         .select("id, full_name, email")
         .eq("manager_id", userId)
         .eq("is_active", true);

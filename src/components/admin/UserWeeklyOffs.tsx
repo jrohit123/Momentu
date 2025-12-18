@@ -62,7 +62,7 @@ export const UserWeeklyOffs = ({ user }: UserWeeklyOffsProps) => {
     try {
       setLoading(true);
       const { data: profile } = await supabase
-        .from("profiles")
+        .from("users")
         .select("organization_id")
         .eq("id", user.id)
         .single();
@@ -74,7 +74,7 @@ export const UserWeeklyOffs = ({ user }: UserWeeklyOffsProps) => {
       if (isAdmin) {
         // Admins can see all users in organization
         const { data } = await supabase
-          .from("profiles")
+          .from("users")
           .select("id, full_name, email")
           .eq("organization_id", profile.organization_id)
           .eq("is_active", true)
@@ -85,7 +85,7 @@ export const UserWeeklyOffs = ({ user }: UserWeeklyOffsProps) => {
         const subordinateIds = subordinates.map((s) => s.id);
         if (subordinateIds.length > 0) {
           const { data } = await supabase
-            .from("profiles")
+            .from("users")
             .select("id, full_name, email")
             .in("id", subordinateIds)
             .eq("is_active", true)

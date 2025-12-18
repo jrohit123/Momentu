@@ -45,14 +45,14 @@ const Index = () => {
               Get Started
               <TrendingUp className="ml-2 w-5 h-5" />
             </Button>
-            <Button
+            {/* <Button
               size="lg"
               variant="outline"
               onClick={() => navigate("/auth")}
               className="text-lg px-8 py-6"
             >
               Sign In
-            </Button>
+            </Button> */}
           </div>
         </div>
 

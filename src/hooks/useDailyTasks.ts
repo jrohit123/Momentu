@@ -23,6 +23,11 @@ interface TaskAssignment {
   id: string;
   task_id: string;
   assigned_to: string;
+  assigned_by: string;
+  assigner?: {
+    id: string;
+    full_name: string | null;
+  } | null;
   task: Task;
 }
 
@@ -62,14 +67,19 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
       const dateStr = format(targetDate, "yyyy-MM-dd");
       const workingDayInfo = isWorkingDay(targetDate);
 
-      // Fetch user's task assignments with task details
+      // Fetch user's task assignments with task details and assigner info
       const { data: assignments, error: assignError } = await supabase
         .from("task_assignments")
         .select(`
           id,
           task_id,
           assigned_to,
-          task:tasks (
+          assigned_by,
+          assigner:users!task_assignments_assigned_by_fkey (
+            id,
+            full_name
+          ),
+          task:tasks!task_assignments_task_id_fkey (
             id,
             name,
             description,

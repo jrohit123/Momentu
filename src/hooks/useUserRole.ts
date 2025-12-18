@@ -19,7 +19,7 @@ export const useUserRole = (userId: string) => {
 
       // First get user's organization
       const { data: profile } = await supabase
-        .from("profiles")
+        .from("users")
         .select("organization_id")
         .eq("id", userId)
         .single();
@@ -41,7 +41,7 @@ export const useUserRole = (userId: string) => {
 
       // Check if user has any subordinates (is a manager)
       const { data: subordinates } = await supabase
-        .from("profiles")
+        .from("users")
         .select("id")
         .eq("manager_id", userId)
         .limit(1);

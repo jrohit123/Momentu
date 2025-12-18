@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -9,9 +9,20 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Calendar, Edit } from "lucide-react";
+import { Loader2, Calendar, Edit, User, Users, AlertCircle } from "lucide-react";
 import { RecurrenceConfig } from "./RecurrenceConfig";
+import { useOrganizationMembers } from "@/hooks/useOrganizationMembers";
+import { useSystemSettings } from "@/hooks/useSystemSettings";
+import { DelegationTypeBadge } from "./DelegationTypeBadge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Check, Search, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const taskSchema = z.object({
   name: z.string().trim().min(1, "Task name is required").max(200, "Task name must be less than 200 characters"),
@@ -43,8 +54,51 @@ interface TaskCreateDialogProps {
 
 export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: TaskCreateDialogProps) => {
   const [loading, setLoading] = useState(false);
+  const [selectedAssignees, setSelectedAssignees] = useState<string[]>([]);
+  const [userProfile, setUserProfile] = useState<{ manager_id: string | null; organization_id: string } | null>(null);
+  const [delegationTypes, setDelegationTypes] = useState<Map<string, "self" | "downward" | "peer" | "upward">>(new Map());
+  const [managerCheckResults, setManagerCheckResults] = useState<Map<string, boolean>>(new Map());
   const { toast } = useToast();
   const isEditMode = !!taskToEdit;
+
+  // Get current user ID
+  const [currentUserId, setCurrentUserId] = useState<string>("");
+  const [userLoading, setUserLoading] = useState(true);
+
+  useEffect(() => {
+    const getUser = async () => {
+      try {
+        setUserLoading(true);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setCurrentUserId(user.id);
+        }
+      } catch (error) {
+        console.error("Error getting user:", error);
+      } finally {
+        setUserLoading(false);
+      }
+    };
+    if (open) {
+      getUser();
+    }
+  }, [open]);
+
+  // Call hooks unconditionally (React requirement) but with safe defaults
+  const { members: organizationMembers = [], loading: membersLoading } = useOrganizationMembers(userProfile?.organization_id || null);
+  const { settings: systemSettings, loading: settingsLoading } = useSystemSettings(userProfile?.organization_id || null);
+  
+  // Provide safe defaults for systemSettings
+  const safeSystemSettings = systemSettings || {
+    timezone: "Asia/Kolkata",
+    date_format: "YYYY-MM-DD",
+    allow_upward_delegation: false,
+    require_task_approval: false,
+  };
+
+  // Search state for autocomplete
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const form = useForm<TaskFormValues>({
     resolver: zodResolver(taskSchema),
@@ -58,6 +112,120 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
     },
   });
 
+  // Fetch user profile when dialog opens
+  useEffect(() => {
+    if (open && currentUserId) {
+      const fetchProfile = async () => {
+        try {
+          const { data, error } = await supabase
+            .from("users")
+            .select("manager_id, organization_id")
+            .eq("id", currentUserId)
+            .single();
+
+          if (!error && data) {
+            setUserProfile(data);
+          }
+        } catch (error) {
+          console.error("Error fetching profile:", error);
+        }
+      };
+      fetchProfile();
+    } else {
+      setUserProfile(null);
+      setSelectedAssignees([]);
+      setSearchQuery("");
+      setSearchOpen(false);
+    }
+  }, [open, currentUserId]);
+
+  // Calculate delegation types for organization members
+  useEffect(() => {
+    if (!userProfile || settingsLoading || !currentUserId || !organizationMembers.length) {
+      setManagerCheckResults(new Map());
+      setDelegationTypes(new Map());
+      return;
+    }
+
+    const checkRelationships = async () => {
+      try {
+        const managerResults = new Map<string, boolean>();
+        const delegationTypeMap = new Map<string, "self" | "downward" | "peer" | "upward">();
+        
+        for (const member of organizationMembers) {
+          if (member.id === currentUserId) {
+            managerResults.set(member.id, false);
+            delegationTypeMap.set(member.id, "self");
+            continue;
+          }
+
+          try {
+            const { data: isManager } = await supabase.rpc("is_manager_of", {
+              _manager_id: member.id,
+              _subordinate_id: currentUserId,
+            });
+
+            managerResults.set(member.id, isManager || false);
+
+            if (isManager) {
+              delegationTypeMap.set(member.id, "upward");
+            } else {
+              const { data: isSubordinate } = await supabase.rpc("is_manager_of", {
+                _manager_id: currentUserId,
+                _subordinate_id: member.id,
+              });
+
+              if (isSubordinate) {
+                delegationTypeMap.set(member.id, "downward");
+              } else {
+                delegationTypeMap.set(member.id, "peer");
+              }
+            }
+          } catch (error) {
+            console.error(`Error checking relationship for ${member.id}:`, error);
+            // Default to peer if there's an error
+            delegationTypeMap.set(member.id, "peer");
+          }
+        }
+
+        setManagerCheckResults(managerResults);
+        setDelegationTypes(delegationTypeMap);
+      } catch (error) {
+        console.error("Error in checkRelationships:", error);
+      }
+    };
+
+    checkRelationships();
+  }, [organizationMembers, currentUserId, userProfile, settingsLoading]);
+
+  // Filter searchable members based on upward delegation setting and search query
+  const searchableMembers = useMemo(() => {
+    if (settingsLoading || !currentUserId) return [];
+
+    let filtered = organizationMembers.filter((member) => {
+      if (member.id === currentUserId) return true;
+      if (!safeSystemSettings.allow_upward_delegation) {
+        const isManager = managerCheckResults.get(member.id);
+        if (isManager) return false;
+      }
+      return true;
+    });
+
+    // Filter by search query (minimum 3 characters)
+    if (searchQuery.length >= 3) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((member) => 
+        member.full_name.toLowerCase().includes(query) ||
+        member.email.toLowerCase().includes(query)
+      );
+    } else {
+      // If less than 3 characters, return empty array
+      filtered = [];
+    }
+
+    return filtered;
+  }, [organizationMembers, currentUserId, safeSystemSettings.allow_upward_delegation, settingsLoading, managerCheckResults, searchQuery]);
+
   // Populate form when editing
   useEffect(() => {
     if (taskToEdit && open) {
@@ -69,6 +237,8 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
         recurrence_type: taskToEdit.recurrence_type as any,
         recurrence_config: taskToEdit.recurrence_config,
       });
+      // Load existing assignments for edit mode
+      loadExistingAssignments();
     } else if (!taskToEdit && open) {
       form.reset({
         name: "",
@@ -78,8 +248,34 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
         recurrence_type: "none",
         recurrence_config: null,
       });
+      // Reset assignees for new tasks
+      setSelectedAssignees([]);
     }
   }, [taskToEdit, open, form]);
+
+  const loadExistingAssignments = async () => {
+    if (!taskToEdit) return;
+    try {
+      const { data, error } = await supabase
+        .from("task_assignments")
+        .select("assigned_to")
+        .eq("task_id", taskToEdit.id);
+
+      if (!error && data) {
+        setSelectedAssignees(data.map((a) => a.assigned_to));
+      }
+    } catch (error) {
+      console.error("Error loading assignments:", error);
+    }
+  };
+
+  const handleAssigneeToggle = (memberId: string) => {
+    setSelectedAssignees((prev) =>
+      prev.includes(memberId)
+        ? prev.filter((id) => id !== memberId)
+        : [...prev, memberId]
+    );
+  };
 
   const onSubmit = async (values: TaskFormValues) => {
     setLoading(true);
@@ -112,6 +308,85 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
 
         if (updateError) throw updateError;
 
+        // Update assignments if changed
+        if (selectedAssignees.length > 0) {
+          // Get current assignments
+          const { data: currentAssignments } = await supabase
+            .from("task_assignments")
+            .select("assigned_to")
+            .eq("task_id", taskToEdit.id);
+
+          const currentAssigneeIds = currentAssignments?.map((a) => a.assigned_to) || [];
+          
+          // Find new assignees to add
+          const newAssignees = selectedAssignees.filter((id) => !currentAssigneeIds.includes(id));
+          
+          // Find assignees to remove
+          const assigneesToRemove = currentAssigneeIds.filter((id) => !selectedAssignees.includes(id));
+
+          // Remove assignments
+          if (assigneesToRemove.length > 0) {
+            const { error: removeError } = await supabase
+              .from("task_assignments")
+              .delete()
+              .eq("task_id", taskToEdit.id)
+              .in("assigned_to", assigneesToRemove);
+
+            if (removeError) throw removeError;
+          }
+
+          // Add new assignments
+          if (newAssignees.length > 0) {
+            const newAssignments = await Promise.all(
+              newAssignees.map(async (assigneeId) => {
+                let delegationType: "self" | "downward" | "peer" | "upward" = "peer";
+
+                if (assigneeId === user.id) {
+                  delegationType = "self";
+                } else {
+                  const { data: isManager } = await supabase.rpc("is_manager_of", {
+                    _manager_id: assigneeId,
+                    _subordinate_id: user.id,
+                  });
+
+                  if (isManager) {
+                    if (!safeSystemSettings.allow_upward_delegation) {
+                      throw new Error(
+                        `Cannot assign task to ${organizationMembers.find((m) => m.id === assigneeId)?.full_name || "your manager"}. Upward delegation is disabled.`
+                      );
+                    }
+                    delegationType = "upward";
+                  } else {
+                    const { data: isSubordinate } = await supabase.rpc("is_manager_of", {
+                      _manager_id: user.id,
+                      _subordinate_id: assigneeId,
+                    });
+
+                    if (isSubordinate) {
+                      delegationType = "downward";
+                    } else {
+                      delegationType = "peer";
+                    }
+                  }
+                }
+
+                return {
+                  task_id: taskToEdit.id,
+                  assigned_to: assigneeId,
+                  assigned_by: user.id,
+                  delegation_type: delegationType,
+                };
+              })
+            );
+
+            const { error: addError } = await supabase
+              .from("task_assignments")
+              .insert(newAssignments);
+
+            if (addError) throw addError;
+          }
+        }
+
         toast({
           title: "Success!",
           description: "Task updated successfully",
@@ -134,20 +409,65 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
 
         if (taskError) throw taskError;
 
-        // Auto-assign the task to the creator
+        // Assign the task to selected assignees (or creator if none selected)
+        const assigneesToAssign = selectedAssignees.length > 0 ? selectedAssignees : [user.id];
+        
+        // Determine delegation type for each assignment
+        const assignments = await Promise.all(
+          assigneesToAssign.map(async (assigneeId) => {
+            let delegationType: "self" | "downward" | "peer" | "upward" = "peer";
+
+            if (assigneeId === user.id) {
+              delegationType = "self";
+            } else {
+              const { data: isManager } = await supabase.rpc("is_manager_of", {
+                _manager_id: assigneeId,
+                _subordinate_id: user.id,
+              });
+
+              if (isManager) {
+                    if (!safeSystemSettings.allow_upward_delegation) {
+                      throw new Error(
+                        `Cannot assign task to ${organizationMembers.find((m) => m.id === assigneeId)?.full_name || "your manager"}. Upward delegation is disabled.`
+                      );
+                    }
+                delegationType = "upward";
+              } else {
+                const { data: isSubordinate } = await supabase.rpc("is_manager_of", {
+                  _manager_id: user.id,
+                  _subordinate_id: assigneeId,
+                });
+
+                if (isSubordinate) {
+                  delegationType = "downward";
+                } else {
+                  delegationType = "peer";
+                }
+              }
+            }
+
+            return {
+              task_id: taskData.id,
+              assigned_to: assigneeId,
+              assigned_by: user.id,
+              delegation_type: delegationType,
+            };
+          })
+        );
+
         const { error: assignError } = await supabase
           .from("task_assignments")
-          .insert({
-            task_id: taskData.id,
-            assigned_to: user.id,
-            assigned_by: user.id,
-          });
+          .insert(assignments);
 
         if (assignError) throw assignError;
 
+        const assigneeNames = assigneesToAssign
+          .map((id) => organizationMembers.find((m) => m.id === id)?.full_name || "you")
+          .join(", ");
+
         toast({
           title: "Success!",
-          description: "Task created and assigned to you",
+          description: `Task created and assigned to ${assigneeNames}`,
         });
       }
 
@@ -164,6 +484,19 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
       setLoading(false);
     }
   };
+
+  // Show loading state while fetching user
+  if (userLoading && open) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-2xl">
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -292,6 +625,144 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
               value={form.watch("recurrence_config")}
               onChange={(config) => form.setValue("recurrence_config", config)}
             />
+
+            {/* Assignment Section - Only show if we have user ID */}
+            {currentUserId && (
+              <div className="space-y-3 pt-4 border-t">
+                <FormLabel>Assign To</FormLabel>
+                <FormDescription>
+                  Search and select people to assign this task to. Type at least 3 characters to search. If none selected, task will be assigned to you.
+                </FormDescription>
+                
+                {!safeSystemSettings.allow_upward_delegation && (
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      Upward delegation is disabled. Your manager(s) and their managers are not shown.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {/* Selected Assignees */}
+                {selectedAssignees.length > 0 && (
+                  <div className="flex flex-wrap gap-2 p-3 border rounded-md bg-muted/30">
+                    {selectedAssignees.map((assigneeId) => {
+                      const member = organizationMembers.find((m) => m.id === assigneeId);
+                      if (!member) return null;
+                      return (
+                        <Badge
+                          key={assigneeId}
+                          variant="secondary"
+                          className="flex items-center gap-2 px-3 py-1.5"
+                        >
+                          <User className="w-3 h-3" />
+                          <span>{member.full_name}</span>
+                          {delegationTypes.has(assigneeId) && (
+                            <DelegationTypeBadge
+                              delegationType={delegationTypes.get(assigneeId) || null}
+                              showIcon={false}
+                            />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleAssigneeToggle(assigneeId)}
+                            className="ml-1 hover:bg-destructive/20 rounded-full p-0.5"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Search Input with Autocomplete */}
+                <Popover open={searchOpen} onOpenChange={setSearchOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-start text-left font-normal"
+                      onClick={() => setSearchOpen(true)}
+                    >
+                      <Search className="mr-2 h-4 w-4" />
+                      {searchQuery.length >= 3
+                        ? `Searching for "${searchQuery}"...`
+                        : "Type at least 3 characters to search for people"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[400px] p-0" align="start">
+                    <Command>
+                      <CommandInput
+                        placeholder="Search by name or email (min 3 characters)..."
+                        value={searchQuery}
+                        onValueChange={setSearchQuery}
+                      />
+                      <CommandList>
+                        {membersLoading || settingsLoading ? (
+                          <div className="flex items-center justify-center py-6">
+                            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : searchQuery.length < 3 ? (
+                          <CommandEmpty>
+                            Type at least 3 characters to search
+                          </CommandEmpty>
+                        ) : searchableMembers.length === 0 ? (
+                          <CommandEmpty>No people found matching "{searchQuery}"</CommandEmpty>
+                        ) : (
+                          <CommandGroup>
+                            {searchableMembers.map((member) => {
+                              const isSelected = selectedAssignees.includes(member.id);
+                              return (
+                                <CommandItem
+                                  key={member.id}
+                                  value={`${member.full_name} ${member.email}`}
+                                  onSelect={() => {
+                                    handleAssigneeToggle(member.id);
+                                    setSearchQuery("");
+                                    setSearchOpen(false);
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      isSelected ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <User className="w-4 h-4 text-muted-foreground" />
+                                      <span className="font-medium truncate">
+                                        {member.full_name}
+                                      </span>
+                                      {member.id === currentUserId && (
+                                        <Badge variant="secondary" className="text-xs">
+                                          You
+                                        </Badge>
+                                      )}
+                                      {delegationTypes.has(member.id) && (
+                                        <DelegationTypeBadge
+                                          delegationType={delegationTypes.get(member.id) || null}
+                                          showIcon={true}
+                                        />
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-muted-foreground truncate">
+                                      {member.email}
+                                    </p>
+                                  </div>
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        )}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>

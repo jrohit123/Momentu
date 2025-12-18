@@ -1,15 +1,19 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { User } from "@supabase/supabase-js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Plus, Clock, CheckCircle, XCircle, AlertCircle, Calendar } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { useDailyTasks } from "@/hooks/useDailyTasks";
 import { useWorkingDays } from "@/hooks/useWorkingDays";
-import { TaskCompletionDialog } from "@/components/tasks/TaskCompletionDialog";
+import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
@@ -21,10 +25,27 @@ interface DailyViewProps {
 
 const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
   const [today] = useState(new Date());
+  const [fullName, setFullName] = useState<string | null>(null);
   const { tasks, pendingTasks, loading, markTaskComplete } = useDailyTasks(user.id, today);
   const { isWorkingDay } = useWorkingDays(user.id);
   
   const workingDayInfo = isWorkingDay(today);
+
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      const { data } = await supabase
+        .from("users")
+        .select("full_name")
+        .eq("id", user.id)
+        .single();
+      
+      if (data?.full_name) {
+        setFullName(data.full_name);
+      }
+    };
+
+    fetchUserProfile();
+  }, [user.id]);
 
   const stats = useMemo(() => {
     const completed = tasks.filter(t => t.status === "completed").length;
@@ -57,6 +78,7 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
       <div className="space-y-2">
         <h2 className="font-heading text-3xl font-bold text-foreground">
           Good {new Date().getHours() < 12 ? "Morning" : new Date().getHours() < 18 ? "Afternoon" : "Evening"}
+          {fullName && `, ${fullName}`}
         </h2>
         <div className="flex items-center gap-2">
           <p className="text-muted-foreground text-lg">
@@ -139,6 +161,7 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
                 <TaskItem
                   key={dailyTask.assignment.id}
                   dailyTask={dailyTask}
+                  currentUserId={user.id}
                   onStatusChange={(status, quantity, notes) =>
                     markTaskComplete(dailyTask.assignment.id, status, quantity, notes)
                   }
@@ -165,6 +188,7 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
                 <PendingTaskItem
                   key={`${dailyTask.assignment.id}-${dailyTask.originalDate}`}
                   dailyTask={dailyTask}
+                  currentUserId={user.id}
                   onComplete={(status, quantity, notes) =>
                     markTaskComplete(
                       dailyTask.assignment.id,
@@ -187,6 +211,11 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
 interface TaskItemProps {
   dailyTask: {
     assignment: {
+      id: string;
+      assigner?: {
+        id: string;
+        full_name: string | null;
+      } | null;
       task: {
         name: string;
         description: string | null;
@@ -200,12 +229,35 @@ interface TaskItemProps {
     };
   };
   onStatusChange: (status: TaskStatus, quantity?: number, notes?: string) => void;
+  currentUserId: string;
 }
 
-const TaskItem = ({ dailyTask, onStatusChange }: TaskItemProps) => {
+const TaskItem = ({ dailyTask, onStatusChange, currentUserId }: TaskItemProps) => {
   const { task } = dailyTask.assignment;
   const status = dailyTask.status;
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [quantity, setQuantity] = useState<string>("");
+  const [completionStatus, setCompletionStatus] = useState<string>("");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState("");
+
+  const hasBenchmark = task.benchmark !== null && task.benchmark > 1;
+  const quantityNum = quantity ? parseFloat(quantity) : 0;
+
+  // Auto-determine status based on quantity vs benchmark
+  const derivedStatus: TaskStatus = hasBenchmark
+    ? quantityNum >= task.benchmark!
+      ? "completed"
+      : quantityNum > 0
+        ? "partial"
+        : "not_done"
+    : completionStatus === "completed"
+      ? "completed"
+      : completionStatus === "not_done"
+        ? "not_done"
+        : "not_done";
+
+  const requiresNotes = derivedStatus === "not_done" || derivedStatus === "partial";
+  const effectiveQuantity = hasBenchmark ? quantityNum : (completionStatus === "completed" ? 1 : undefined);
 
   const getStatusIcon = () => {
     switch (status) {
@@ -263,13 +315,56 @@ const TaskItem = ({ dailyTask, onStatusChange }: TaskItemProps) => {
     }
   };
 
+  const getDerivedStatusBadge = () => {
+    switch (derivedStatus) {
+      case "completed":
+        return <Badge className="bg-success/10 text-success border-success/30">Completed</Badge>;
+      case "partial":
+        return <Badge className="bg-warning/10 text-warning border-warning/30">Partial</Badge>;
+      case "not_done":
+        return <Badge className="bg-destructive/10 text-destructive border-destructive/30">Not Done</Badge>;
+      default:
+        return null;
+    }
+  };
+
   const canTakeAction = status === "scheduled" || status === "pending";
 
+  const handleSubmit = () => {
+    setError("");
+
+    // Validate quantity is required when benchmark exists
+    if (hasBenchmark && !quantity) {
+      setError("Quantity is required for tasks with a benchmark");
+      return;
+    }
+
+    // Validate mandatory comments for incomplete/partial tasks
+    if (requiresNotes && !notes.trim()) {
+      setError("Comments are mandatory for incomplete or partial tasks");
+      return;
+    }
+
+    onStatusChange(derivedStatus, effectiveQuantity, notes.trim() || undefined);
+    
+    // Reset form
+    setQuantity("");
+    setCompletionStatus("");
+    setNotes("");
+    setError("");
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      handleSubmit();
+    }
+  };
+
   return (
-    <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:border-primary/30 transition-all hover:shadow-md bg-card">
-      <div className="flex items-center gap-3 flex-1">
+    <div className="flex items-start gap-4 p-4 rounded-lg border border-border hover:border-primary/30 transition-all hover:shadow-md bg-card">
+      <div className="flex items-center gap-3 flex-1 min-w-0 w-2/3">
         {getStatusIcon()}
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <div className="font-medium text-foreground">{task.name}</div>
             {task.category && (
@@ -286,31 +381,107 @@ const TaskItem = ({ dailyTask, onStatusChange }: TaskItemProps) => {
           )}
         </div>
       </div>
-      <div className="flex items-center gap-3">
-        {canTakeAction ? (
-          <>
-            <Button
-              size="sm"
-              variant="default"
-              onClick={() => setDialogOpen(true)}
-            >
-              Update Status
-            </Button>
-            <TaskCompletionDialog
-              open={dialogOpen}
-              onOpenChange={setDialogOpen}
-              taskName={task.name}
-              benchmark={task.benchmark}
-              description={task.description}
-              onSubmit={(status, quantity, notes) => {
-                onStatusChange(status, quantity, notes);
-              }}
-            />
-          </>
-        ) : (
-          getStatusBadge()
-        )}
-      </div>
+      {canTakeAction ? (
+        <div className="flex flex-col gap-3 flex-1 min-w-0 w-1/3">
+          {/* Work Done, Comments, and Save button in one line */}
+          <div className="flex items-start gap-3">
+            {/* Work Done Field */}
+            <div className="space-y-2 flex-1">
+              <Label htmlFor={`work-done-${dailyTask.assignment.id}`} className="text-xs">
+                Work Done {hasBenchmark && <span className="text-destructive">*</span>}
+                {hasBenchmark && <span className="text-muted-foreground ml-1">(Benchmark: {task.benchmark})</span>}
+              </Label>
+              {hasBenchmark ? (
+                <Input
+                  id={`work-done-${dailyTask.assignment.id}`}
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  placeholder="Enter quantity"
+                  value={quantity}
+                  onChange={(e) => {
+                    setQuantity(e.target.value);
+                    setError("");
+                  }}
+                  onKeyDown={handleKeyDown}
+                  className="h-8"
+                />
+              ) : (
+                <RadioGroup
+                  value={completionStatus}
+                  onValueChange={(value) => {
+                    setCompletionStatus(value);
+                    setError("");
+                  }}
+                  className="flex flex-col gap-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem value="completed" id={`work-done-completed-${dailyTask.assignment.id}`} />
+                    <Label htmlFor={`work-done-completed-${dailyTask.assignment.id}`} className="text-xs font-normal cursor-pointer">
+                      Task completed
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem value="not_done" id={`work-done-not-done-${dailyTask.assignment.id}`} />
+                    <Label htmlFor={`work-done-not-done-${dailyTask.assignment.id}`} className="text-xs font-normal cursor-pointer">
+                      Not completed
+                    </Label>
+                  </div>
+                </RadioGroup>
+              )}
+            </div>
+
+            {/* Comments Field */}
+            <div className="space-y-2 flex-1">
+              <Label htmlFor={`notes-${dailyTask.assignment.id}`} className="text-xs">
+                Comments {requiresNotes && <span className="text-destructive">*</span>}
+              </Label>
+              <Textarea
+                id={`notes-${dailyTask.assignment.id}`}
+                placeholder={requiresNotes ? "Please provide a reason (required)" : "Add any notes (optional)"}
+                value={notes}
+                onChange={(e) => {
+                  setNotes(e.target.value);
+                  setError("");
+                }}
+                onKeyDown={handleKeyDown}
+                className="min-h-[60px] text-sm"
+              />
+              {error && <p className="text-xs text-destructive">{error}</p>}
+            </div>
+
+            {/* Submit Button */}
+            <div className="flex items-end">
+              <Button
+                size="sm"
+                onClick={handleSubmit}
+                className="h-8"
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+
+          {/* Status Preview */}
+          {(quantity || completionStatus) && (
+            <div className="space-y-1">
+              <Label className="text-xs">Status will be set as:</Label>
+              <div className="flex items-center gap-2">
+                {getDerivedStatusBadge()}
+                {hasBenchmark && quantityNum > 0 && quantityNum < task.benchmark! && (
+                  <span className="text-xs text-muted-foreground">
+                    ({quantityNum}/{task.benchmark} = {Math.floor((quantityNum / task.benchmark!) * 100)}%)
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          {getStatusBadge()}
+        </div>
+      )}
     </div>
   );
 };
@@ -318,6 +489,11 @@ const TaskItem = ({ dailyTask, onStatusChange }: TaskItemProps) => {
 interface PendingTaskItemProps {
   dailyTask: {
     assignment: {
+      id: string;
+      assigner?: {
+        id: string;
+        full_name: string | null;
+      } | null;
       task: {
         name: string;
         description: string | null;
@@ -327,18 +503,84 @@ interface PendingTaskItemProps {
     originalDate?: string;
   };
   onComplete: (status: TaskStatus, quantity?: number, notes?: string) => void;
+  currentUserId: string;
 }
 
-const PendingTaskItem = ({ dailyTask, onComplete }: PendingTaskItemProps) => {
+const PendingTaskItem = ({ dailyTask, onComplete, currentUserId }: PendingTaskItemProps) => {
   const { task } = dailyTask.assignment;
   const originalDate = dailyTask.originalDate;
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [quantity, setQuantity] = useState<string>("");
+  const [completionStatus, setCompletionStatus] = useState<string>("");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState("");
+
+  const hasBenchmark = task.benchmark !== null && task.benchmark > 1;
+  const quantityNum = quantity ? parseFloat(quantity) : 0;
+
+  // Auto-determine status based on quantity vs benchmark
+  const derivedStatus: TaskStatus = hasBenchmark
+    ? quantityNum >= task.benchmark!
+      ? "completed"
+      : quantityNum > 0
+        ? "partial"
+        : "not_done"
+    : completionStatus === "completed"
+      ? "completed"
+      : completionStatus === "not_done"
+        ? "not_done"
+        : "not_done";
+
+  const requiresNotes = derivedStatus === "not_done" || derivedStatus === "partial";
+  const effectiveQuantity = hasBenchmark ? quantityNum : (completionStatus === "completed" ? 1 : undefined);
+
+  const getDerivedStatusBadge = () => {
+    switch (derivedStatus) {
+      case "completed":
+        return <Badge className="bg-success/10 text-success border-success/30">Completed</Badge>;
+      case "partial":
+        return <Badge className="bg-warning/10 text-warning border-warning/30">Partial</Badge>;
+      case "not_done":
+        return <Badge className="bg-destructive/10 text-destructive border-destructive/30">Not Done</Badge>;
+      default:
+        return null;
+    }
+  };
+
+  const handleSubmit = () => {
+    setError("");
+
+    // Validate quantity is required when benchmark exists
+    if (hasBenchmark && !quantity) {
+      setError("Quantity is required for tasks with a benchmark");
+      return;
+    }
+
+    // Validate mandatory comments for incomplete/partial tasks
+    if (requiresNotes && !notes.trim()) {
+      setError("Comments are mandatory for incomplete or partial tasks");
+      return;
+    }
+
+    onComplete(derivedStatus, effectiveQuantity, notes.trim() || undefined);
+    
+    // Reset form
+    setQuantity("");
+    setCompletionStatus("");
+    setNotes("");
+    setError("");
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      handleSubmit();
+    }
+  };
 
   return (
-    <div className="flex items-center justify-between p-4 rounded-lg border border-warning/30 bg-warning/5">
-      <div className="flex items-center gap-3 flex-1">
+    <div className="flex items-start gap-4 p-4 rounded-lg border border-warning/30 bg-warning/5">
+      <div className="flex items-center gap-3 flex-1 min-w-0 w-2/3">
         <AlertCircle className="w-5 h-5 text-warning flex-shrink-0" />
-        <div>
+        <div className="flex-1 min-w-0">
           <div className="font-medium text-foreground">{task.name}</div>
           {task.description && (
             <div className="text-sm text-muted-foreground">{task.description}</div>
@@ -350,22 +592,101 @@ const PendingTaskItem = ({ dailyTask, onComplete }: PendingTaskItemProps) => {
           </div>
         </div>
       </div>
-      <Button
-        size="sm"
-        variant="default"
-        onClick={() => setDialogOpen(true)}
-      >
-        Update Status
-      </Button>
-      <TaskCompletionDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        taskName={task.name}
-        benchmark={task.benchmark}
-        onSubmit={(status, quantity, notes) => {
-          onComplete(status, quantity, notes);
-        }}
-      />
+      <div className="flex flex-col gap-3 flex-1 min-w-0 w-1/3">
+        {/* Work Done, Comments, and Save button in one line */}
+        <div className="flex items-start gap-3">
+          {/* Work Done Field */}
+          <div className="space-y-2 flex-1">
+            <Label htmlFor={`work-done-pending-${dailyTask.assignment.id}`} className="text-xs">
+              Work Done {hasBenchmark && <span className="text-destructive">*</span>}
+              {hasBenchmark && <span className="text-muted-foreground ml-1">(Benchmark: {task.benchmark})</span>}
+            </Label>
+            {hasBenchmark ? (
+              <Input
+                id={`work-done-pending-${dailyTask.assignment.id}`}
+                type="number"
+                step="0.5"
+                min="0"
+                placeholder="Enter quantity"
+                value={quantity}
+                onChange={(e) => {
+                  setQuantity(e.target.value);
+                  setError("");
+                }}
+                onKeyDown={handleKeyDown}
+                className="h-8"
+              />
+              ) : (
+                <RadioGroup
+                  value={completionStatus}
+                  onValueChange={(value) => {
+                    setCompletionStatus(value);
+                    setError("");
+                  }}
+                  className="flex flex-col gap-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem value="completed" id={`work-done-completed-pending-${dailyTask.assignment.id}`} />
+                    <Label htmlFor={`work-done-completed-pending-${dailyTask.assignment.id}`} className="text-xs font-normal cursor-pointer">
+                      Task completed
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem value="not_done" id={`work-done-not-done-pending-${dailyTask.assignment.id}`} />
+                    <Label htmlFor={`work-done-not-done-pending-${dailyTask.assignment.id}`} className="text-xs font-normal cursor-pointer">
+                      Not completed
+                    </Label>
+                  </div>
+                </RadioGroup>
+              )}
+          </div>
+
+          {/* Comments Field */}
+          <div className="space-y-2 flex-1">
+            <Label htmlFor={`notes-pending-${dailyTask.assignment.id}`} className="text-xs">
+              Comments {requiresNotes && <span className="text-destructive">*</span>}
+            </Label>
+            <Textarea
+              id={`notes-pending-${dailyTask.assignment.id}`}
+              placeholder={requiresNotes ? "Please provide a reason (required)" : "Add any notes (optional)"}
+              value={notes}
+              onChange={(e) => {
+                setNotes(e.target.value);
+                setError("");
+              }}
+              onKeyDown={handleKeyDown}
+              className="min-h-[60px] text-sm"
+            />
+            {error && <p className="text-xs text-destructive">{error}</p>}
+          </div>
+
+          {/* Submit Button */}
+          <div className="flex items-end">
+            <Button
+              size="sm"
+              onClick={handleSubmit}
+              className="h-8"
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+
+        {/* Status Preview */}
+        {(quantity || completionStatus) && (
+          <div className="space-y-1">
+            <Label className="text-xs">Status will be set as:</Label>
+            <div className="flex items-center gap-2">
+              {getDerivedStatusBadge()}
+              {hasBenchmark && quantityNum > 0 && quantityNum < task.benchmark! && (
+                <span className="text-xs text-muted-foreground">
+                  ({quantityNum}/{task.benchmark} = {Math.floor((quantityNum / task.benchmark!) * 100)}%)
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

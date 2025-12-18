@@ -164,6 +164,74 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
       };
     }
   }, [selectedSubordinateId, subordinates, teamStats, tasks]);
+
+  // Calculate day-wise completion percentages
+  const dayWiseCompletion = useMemo(() => {
+    const dayStats = new Map<string, { completed: number; scheduled: number; percentage: number }>();
+    
+    daysInMonth.forEach((day) => {
+      const dateStr = format(day, "yyyy-MM-dd");
+      let completed = 0;
+      let scheduled = 0;
+      
+      filteredTasks.forEach((taskData) => {
+        const status = taskData.dailyStatuses.get(dateStr);
+        const quantity = taskData.dailyQuantities.get(dateStr) || null;
+        const benchmark = taskData.assignment.task.benchmark || null;
+        
+        // Only count if task is scheduled for this day (not NA)
+        if (status && status !== "not_applicable") {
+          scheduled++;
+          
+          if (status === "completed") {
+            completed += 1;
+          } else if (status === "partial" && quantity !== null && benchmark !== null && benchmark > 0) {
+            // Add completion percentage for partial tasks
+            completed += quantity / benchmark;
+          }
+        }
+      });
+      
+      const percentage = scheduled > 0 ? Math.round((completed / scheduled) * 100) : 0;
+      dayStats.set(dateStr, { completed, scheduled, percentage });
+    });
+    
+    return dayStats;
+  }, [filteredTasks, daysInMonth]);
+
+  // Calculate month-wise completion percentage
+  const monthWiseCompletion = useMemo(() => {
+    let totalCompleted = 0;
+    let totalScheduled = 0;
+    
+    daysInMonth.forEach((day) => {
+      const dateStr = format(day, "yyyy-MM-dd");
+      const dayStat = dayWiseCompletion.get(dateStr);
+      
+      if (dayStat) {
+        // For month-wise, we need to recalculate including delayed tasks
+        filteredTasks.forEach((taskData) => {
+          const status = taskData.dailyStatuses.get(dateStr);
+          const quantity = taskData.dailyQuantities.get(dateStr) || null;
+          const benchmark = taskData.assignment.task.benchmark || null;
+          
+          if (status && status !== "not_applicable") {
+            totalScheduled++;
+            
+            if (status === "completed") {
+              totalCompleted += 1;
+            } else if (status === "partial" && quantity !== null && benchmark !== null && benchmark > 0) {
+              totalCompleted += quantity / benchmark;
+            } else if (status === "delayed") {
+              totalCompleted += 0.5;
+            }
+          }
+        });
+      }
+    });
+    
+    return totalScheduled > 0 ? Math.round((totalCompleted / totalScheduled) * 100) : 0;
+  }, [filteredTasks, daysInMonth, dayWiseCompletion]);
   
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);

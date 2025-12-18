@@ -24,7 +24,7 @@ export const useSubordinates = (userId: string) => {
       
       // Fetch all profiles where manager_id = userId (direct reports)
       const { data: directReports, error } = await supabase
-        .from("profiles")
+        .from("users")
         .select("id, full_name, email, manager_id")
         .eq("manager_id", userId)
         .eq("is_active", true)

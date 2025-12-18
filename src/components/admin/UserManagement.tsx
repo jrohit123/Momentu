@@ -12,8 +12,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, UserPlus, Users, Building2, Mail, Clock, X, Copy, Check, Network, Calendar } from "lucide-react";
+import { Shield, UserPlus, Users, Building2, Mail, Clock, X, Copy, Check, Network, Calendar, Settings } from "lucide-react";
 import { TeamHierarchy } from "./TeamHierarchy";
+import { SystemSettings } from "./SystemSettings";
+import { UserWeeklyOffs } from "./UserWeeklyOffs";
 import type { Database } from "@/integrations/supabase/types";
 
 type AppRole = Database["public"]["Enums"]["app_role"];
@@ -62,7 +64,7 @@ export const UserManagement = ({ user }: UserManagementProps) => {
   const fetchUsersAndOrg = async () => {
     try {
       const { data: profile } = await supabase
-        .from("profiles")
+        .from("users")
         .select("organization_id")
         .eq("id", user.id)
         .single();
@@ -78,7 +80,7 @@ export const UserManagement = ({ user }: UserManagementProps) => {
       setOrganization(org);
 
       const { data: orgProfiles } = await supabase
-        .from("profiles")
+        .from("users")
         .select("id, email, full_name, manager_id")
         .eq("organization_id", profile.organization_id);
 
@@ -155,7 +157,7 @@ export const UserManagement = ({ user }: UserManagementProps) => {
     try {
       // Get current user's profile for inviter name
       const { data: profile } = await supabase
-        .from("profiles")
+        .from("users")
         .select("full_name")
         .eq("id", user.id)
         .single();
@@ -257,11 +259,16 @@ export const UserManagement = ({ user }: UserManagementProps) => {
 
       // Check for circular references in the hierarchy
       if (newManagerId) {
-        const { data: managerProfile } = await supabase
-          .from("profiles")
+        const { data: managerProfile, error: managerError } = await supabase
+          .from("users")
           .select("manager_id")
           .eq("id", newManagerId)
           .single();
+
+        if (managerError) {
+          console.error("Error fetching manager profile:", managerError);
+          throw managerError;
+        }
 
         // Check if the new manager is a subordinate of the user being assigned
         let currentManagerId = managerProfile?.manager_id;
@@ -274,28 +281,38 @@ export const UserManagement = ({ user }: UserManagementProps) => {
             });
             return;
           }
-          const { data: nextManager } = await supabase
-            .from("profiles")
+          const { data: nextManager, error: nextError } = await supabase
+            .from("users")
             .select("manager_id")
             .eq("id", currentManagerId)
             .single();
+          
+          if (nextError) {
+            console.error("Error fetching next manager:", nextError);
+            break;
+          }
           currentManagerId = nextManager?.manager_id || null;
         }
       }
 
-      const { error } = await supabase
-        .from("profiles")
+      const { error, data } = await supabase
+        .from("users")
         .update({ manager_id: newManagerId })
-        .eq("id", userId);
+        .eq("id", userId)
+        .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error("Error updating manager:", error);
+        throw error;
+      }
 
       toast({
         title: "Success",
         description: "Manager assignment updated",
       });
-      fetchUsersAndOrg();
+      await fetchUsersAndOrg();
     } catch (error: any) {
+      console.error("handleManagerChange error:", error);
       toast({
         title: "Error",
         description: error.message || "Failed to update manager assignment",
@@ -375,6 +392,10 @@ export const UserManagement = ({ user }: UserManagementProps) => {
           <TabsTrigger value="invitations" className="flex items-center gap-2">
             <UserPlus className="w-4 h-4" />
             Invitations
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="flex items-center gap-2">
+            <Settings className="w-4 h-4" />
+            System Settings
           </TabsTrigger>
         </TabsList>
 
@@ -593,6 +614,11 @@ export const UserManagement = ({ user }: UserManagementProps) => {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* System Settings Tab */}
+        <TabsContent value="settings">
+          <SystemSettings user={user} />
         </TabsContent>
       </Tabs>
     </div>

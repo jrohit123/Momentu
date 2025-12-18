@@ -8,8 +8,10 @@ interface RecurrenceConfig {
   days?: number[]; // For weekly recurrence (0=Sunday, 1=Monday, etc.)
   byweekday?: number[];
   bymonthday?: number[];
+  bymonth?: number[]; // For yearly recurrence (0=January, 1=February, etc.)
   bysetpos?: number[];
   monthlyType?: "date" | "weekday";
+  yearlyType?: "date" | "weekday";
   dayOfMonth?: number;
   until?: string;
   count?: number;
@@ -29,7 +31,24 @@ interface Task {
  * Hook to expand task recurrence patterns and check if a task applies to a specific date
  */
 export const useTaskRecurrence = () => {
-  const getFrequency = (type: string): Frequency => {
+  const getFrequency = (type: string, config?: RecurrenceConfig): Frequency => {
+    // For custom recurrence, get frequency from config
+    if (type === "custom" && config?.frequency) {
+      switch (config.frequency) {
+        case "daily":
+          return RRule.DAILY;
+        case "weekly":
+          return RRule.WEEKLY;
+        case "monthly":
+          return RRule.MONTHLY;
+        case "yearly":
+          return RRule.YEARLY;
+        default:
+          return RRule.DAILY;
+      }
+    }
+    
+    // For standard recurrence types
     switch (type) {
       case "daily":
         return RRule.DAILY;
@@ -70,7 +89,7 @@ export const useTaskRecurrence = () => {
         
         // Build RRule options
         const options: any = {
-          freq: getFrequency(task.recurrence_type),
+          freq: getFrequency(task.recurrence_type, config),
           dtstart,
           interval: config.interval || 1,
         };
@@ -88,19 +107,42 @@ export const useTaskRecurrence = () => {
           options.count = config.count;
         }
 
+        // Determine the effective recurrence type (for custom, use frequency from config)
+        const effectiveType = task.recurrence_type === "custom" 
+          ? (config.frequency || "daily")
+          : task.recurrence_type;
+
+        // RRule weekday mapping: Our system (0=Sunday) -> RRule (0=Monday)
+        const rruleWeekdayMap = [6, 0, 1, 2, 3, 4, 5]; // Maps our day index to RRule weekday
+
+        // Handle yearly recurrence
+        if (effectiveType === "yearly" || (task.recurrence_type === "custom" && config.frequency === "yearly")) {
+          if (config.yearlyType === "weekday" && config.bysetpos && config.byweekday && config.bymonth) {
+            // Yearly relative pattern (e.g., "First Monday of January")
+            options.bysetpos = config.bysetpos;
+            options.byweekday = config.byweekday.map((day: number) => rruleWeekdayMap[day]);
+            // RRule uses 1-12 for months, our system uses 0-11
+            options.bymonth = config.bymonth.map((month: number) => month + 1);
+          } else if (config.yearlyType === "date" && config.dayOfMonth && config.bymonth) {
+            // Yearly by date (e.g., "January 15")
+            options.bymonthday = [config.dayOfMonth];
+            // RRule uses 1-12 for months, our system uses 0-11
+            options.bymonth = config.bymonth.map((month: number) => month + 1);
+          } else if (config.bymonth && config.bymonthday) {
+            // Legacy support for yearly by date
+            options.bymonth = config.bymonth.map((month: number) => month + 1);
+            options.bymonthday = config.bymonthday;
+          } else if (config.bymonth) {
+            // Just month specified
+            options.bymonth = config.bymonth.map((month: number) => month + 1);
+          }
+        }
         // Handle monthly recurrence
-        if (task.recurrence_type === "monthly") {
+        else if (effectiveType === "monthly" || (task.recurrence_type === "custom" && config.frequency === "monthly")) {
           if (config.monthlyType === "weekday" && config.bysetpos && config.byweekday) {
             // Monthly relative pattern (e.g., "First Monday", "Last Friday")
-            // RRule uses: 0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday, 4=Friday, 5=Saturday, 6=Sunday
-            // Our system uses: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday
-            // Mapping: [Sunday(0), Monday(1), Tuesday(2), Wednesday(3), Thursday(4), Friday(5), Saturday(6)]
-            //          -> [RRule Sunday(6), RRule Monday(0), RRule Tuesday(1), RRule Wednesday(2), RRule Thursday(3), RRule Friday(4), RRule Saturday(5)]
-            const rruleWeekdayMap = [6, 0, 1, 2, 3, 4, 5]; // Maps our day index to RRule weekday
             options.bysetpos = config.bysetpos;
-            options.byweekday = config.byweekday.map((day: number) => {
-              return rruleWeekdayMap[day];
-            });
+            options.byweekday = config.byweekday.map((day: number) => rruleWeekdayMap[day]);
           } else if (config.monthlyType === "date" && config.dayOfMonth) {
             // Monthly by day of month (e.g., "On day 15")
             options.bymonthday = [config.dayOfMonth];
@@ -108,26 +150,25 @@ export const useTaskRecurrence = () => {
             // Legacy support
             options.bymonthday = config.bymonthday;
           }
-        } else {
-          // For weekly recurrence - handle both 'days' (from UI) and 'byweekday' (legacy)
-          if (task.recurrence_type === "weekly") {
-            const weekdays = config.days || config.byweekday || [];
-            if (weekdays.length > 0) {
-              // Convert day numbers (0=Sunday, 1=Monday, etc.) to RRule weekdays
-              // RRule uses: 0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday, 4=Friday, 5=Saturday, 6=Sunday
-              // Our system uses: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday
-              const rruleWeekdayMap = [6, 0, 1, 2, 3, 4, 5]; // Maps our day index to RRule weekday
-              options.byweekday = weekdays.map((day: number) => {
-                return rruleWeekdayMap[day];
-              });
-            }
-          } else if (config.byweekday && config.byweekday.length > 0) {
-            // For other recurrence types
+        }
+        // Handle weekly recurrence
+        else if (effectiveType === "weekly" || (task.recurrence_type === "custom" && config.frequency === "weekly")) {
+          const weekdays = config.days || config.byweekday || [];
+          if (weekdays.length > 0) {
+            // Convert day numbers (0=Sunday, 1=Monday, etc.) to RRule weekdays
+            options.byweekday = weekdays.map((day: number) => rruleWeekdayMap[day]);
+          }
+        }
+        // Handle other recurrence types that might have byweekday or bymonthday
+        else {
+          if (config.byweekday && config.byweekday.length > 0) {
             options.byweekday = config.byweekday;
           }
-          // For other recurrence types that might use bymonthday
           if (config.bymonthday && config.bymonthday.length > 0) {
             options.bymonthday = config.bymonthday;
+          }
+          if (config.bymonth && config.bymonth.length > 0) {
+            options.bymonth = config.bymonth.map((month: number) => month + 1);
           }
         }
 

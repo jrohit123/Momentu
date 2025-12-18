@@ -21,7 +21,7 @@ export const useTeamMembers = (userId: string) => {
         
         // Fetch employees where current user is the manager
         const { data: directReports, error: reportsError } = await supabase
-          .from("profiles")
+          .from("users")
           .select("id, full_name, email, department")
           .eq("manager_id", userId)
           .eq("is_active", true);
@@ -30,7 +30,7 @@ export const useTeamMembers = (userId: string) => {
 
         // Also include the current user for self-assignment
         const { data: self, error: selfError } = await supabase
-          .from("profiles")
+          .from("users")
           .select("id, full_name, email, department")
           .eq("id", userId)
           .single();
@@ -52,6 +52,8 @@ export const useTeamMembers = (userId: string) => {
 
     if (userId) {
       fetchTeamMembers();
+    } else {
+      setLoading(false);
     }
   }, [userId, toast]);
 

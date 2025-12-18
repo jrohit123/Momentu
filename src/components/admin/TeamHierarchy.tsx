@@ -40,26 +40,26 @@ export const TeamHierarchy = ({ user }: TeamHierarchyProps) => {
   const fetchTeamMembers = async () => {
     try {
       const { data: profile } = await supabase
-        .from("profiles")
+        .from("users")
         .select("organization_id")
         .eq("id", user.id)
         .maybeSingle();
 
       if (!profile) return;
 
-      const { data: profiles } = await supabase
-        .from("profiles")
+      const { data: users } = await supabase
+        .from("users")
         .select("id, email, full_name, department, manager_id")
         .eq("organization_id", profile.organization_id);
 
-      if (!profiles) return;
+      if (!users) return;
 
       const { data: roles } = await supabase
         .from("user_roles")
         .select("user_id, role")
         .eq("organization_id", profile.organization_id);
 
-      const membersWithRoles: TeamMember[] = profiles.map((p) => ({
+      const membersWithRoles: TeamMember[] = users.map((p) => ({
         id: p.id,
         email: p.email,
         full_name: p.full_name,
@@ -272,21 +272,6 @@ export const TeamHierarchy = ({ user }: TeamHierarchyProps) => {
           </div>
         )}
 
-        {/* Legend */}
-        <div className="mt-6 pt-4 border-t border-border">
-          <p className="text-sm text-muted-foreground mb-2">Legend:</p>
-          <div className="flex flex-wrap gap-3">
-            <Badge variant="outline" className={getRoleColor("admin")}>
-              Admin
-            </Badge>
-            <Badge variant="outline" className={getRoleColor("manager")}>
-              Manager
-            </Badge>
-            <Badge variant="outline" className={getRoleColor("employee")}>
-              Employee
-            </Badge>
-          </div>
-        </div>
       </CardContent>
     </Card>
   );

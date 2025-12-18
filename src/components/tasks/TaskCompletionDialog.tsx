@@ -15,6 +15,11 @@ interface TaskCompletionDialogProps {
   taskName: string;
   benchmark: number | null;
   description?: string | null;
+  assignedBy?: {
+    id: string;
+    full_name: string | null;
+  } | null;
+  currentUserId?: string;
   onSubmit: (status: TaskStatus, quantity?: number, notes?: string) => void;
 }
 
@@ -24,6 +29,8 @@ export const TaskCompletionDialog = ({
   taskName,
   benchmark,
   description,
+  assignedBy,
+  currentUserId,
   onSubmit,
 }: TaskCompletionDialogProps) => {
   const [quantity, setQuantity] = useState<string>("1");
@@ -109,8 +116,16 @@ export const TaskCompletionDialog = ({
               readOnly
               className="min-h-[80px] bg-muted cursor-not-allowed resize-none"
             />
+            {/* Show assigned by only if someone else assigned the task */}
+            {assignedBy && currentUserId && assignedBy.id !== currentUserId && assignedBy.full_name && (
+              <div className="text-sm text-muted-foreground">
+                Assigned by: {assignedBy.full_name}
+              </div>
+            )}
           </div>
         )}
+
+        {/* Remove the separate Assigned By section - it's now in the Task Description area */}
 
         <div className="space-y-4 py-4">
           {/* Quantity Completed */}

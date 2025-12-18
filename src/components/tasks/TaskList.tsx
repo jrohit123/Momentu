@@ -19,6 +19,7 @@ import { Calendar, Repeat, Target, Edit, Trash2, Plus, UserPlus, Users } from "l
 import type { User } from "@supabase/supabase-js";
 import { TaskAssignDialog } from "./TaskAssignDialog";
 import { TaskCreateDialog } from "./TaskCreateDialog";
+import { DelegationTypeBadge } from "./DelegationTypeBadge";
 
 interface Task {
   id: string;
@@ -46,6 +47,7 @@ export const TaskList = ({ user, onCreateClick }: TaskListProps) => {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [assignmentCounts, setAssignmentCounts] = useState<Record<string, number>>({});
+  const [assignmentsByTask, setAssignmentsByTask] = useState<Record<string, Array<{ assigned_to: string; delegation_type: string | null; assigned_by: string }>>>({});
   const { toast } = useToast();
 
   const fetchTasks = async () => {
@@ -60,19 +62,30 @@ export const TaskList = ({ user, onCreateClick }: TaskListProps) => {
       if (error) throw error;
       setTasks(data || []);
 
-      // Fetch assignment counts for each task
+      // Fetch assignment counts and details for each task
       if (data && data.length > 0) {
         const { data: assignments, error: assignError } = await supabase
           .from("task_assignments")
-          .select("task_id")
+          .select("task_id, assigned_to, delegation_type, assigned_by")
           .in("task_id", data.map((t) => t.id));
 
         if (!assignError && assignments) {
           const counts: Record<string, number> = {};
+          const assignmentsMap: Record<string, Array<{ assigned_to: string; delegation_type: string | null; assigned_by: string }>> = {};
+
           assignments.forEach((a) => {
             counts[a.task_id] = (counts[a.task_id] || 0) + 1;
+            if (!assignmentsMap[a.task_id]) {
+              assignmentsMap[a.task_id] = [];
+            }
+            assignmentsMap[a.task_id].push({
+              assigned_to: a.assigned_to,
+              delegation_type: a.delegation_type,
+              assigned_by: a.assigned_by,
+            });
           });
           setAssignmentCounts(counts);
+          setAssignmentsByTask(assignmentsMap);
         }
       }
     } catch (error: any) {
@@ -286,9 +299,20 @@ export const TaskList = ({ user, onCreateClick }: TaskListProps) => {
                   </div>
                 )}
                 {assignmentCounts[task.id] > 0 && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Users className="w-4 h-4" />
-                    <span>{assignmentCounts[task.id]} assigned</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Users className="w-4 h-4" />
+                      <span>{assignmentCounts[task.id]} assigned</span>
+                    </div>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {assignmentsByTask[task.id]?.map((assignment, idx) => (
+                        <DelegationTypeBadge
+                          key={`${assignment.assigned_to}-${idx}`}
+                          delegationType={assignment.delegation_type as any}
+                          showIcon={true}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
