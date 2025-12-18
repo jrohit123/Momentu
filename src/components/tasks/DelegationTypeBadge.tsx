@@ -74,7 +74,9 @@ export const DelegationTypeBadge = ({
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger asChild>{badge}</TooltipTrigger>
+        <TooltipTrigger asChild>
+          {badge}
+        </TooltipTrigger>
         <TooltipContent>
           <p>{config.tooltip}</p>
         </TooltipContent>

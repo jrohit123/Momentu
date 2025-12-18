@@ -2,3 +2,6 @@ project_id = "ifsboadntqhpypurswkz"
 
 [functions.send-invitation-email]
 verify_jwt = true
+
+[functions.send-daily-summary]
+verify_jwt = false

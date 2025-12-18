@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Calendar, Edit, User, Users, AlertCircle } from "lucide-react";
+import { Loader2, Calendar, Edit, User, Users, AlertCircle, Link2 } from "lucide-react";
 import { RecurrenceConfig } from "./RecurrenceConfig";
 import { useOrganizationMembers } from "@/hooks/useOrganizationMembers";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
@@ -55,6 +55,11 @@ interface TaskCreateDialogProps {
 export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: TaskCreateDialogProps) => {
   const [loading, setLoading] = useState(false);
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>([]);
+  const [selectedDependencies, setSelectedDependencies] = useState<string[]>([]);
+  const [availableTasks, setAvailableTasks] = useState<Array<{ id: string; name: string }>>([]);
+  const [dependenciesLoading, setDependenciesLoading] = useState(false);
+  const [dependencySearchQuery, setDependencySearchQuery] = useState("");
+  const [dependencySearchOpen, setDependencySearchOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<{ manager_id: string | null; organization_id: string } | null>(null);
   const [delegationTypes, setDelegationTypes] = useState<Map<string, "self" | "downward" | "peer" | "upward">>(new Map());
   const [managerCheckResults, setManagerCheckResults] = useState<Map<string, boolean>>(new Map());
@@ -93,7 +98,6 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
     timezone: "Asia/Kolkata",
     date_format: "YYYY-MM-DD",
     allow_upward_delegation: false,
-    require_task_approval: false,
   };
 
   // Search state for autocomplete
@@ -237,8 +241,9 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
         recurrence_type: taskToEdit.recurrence_type as any,
         recurrence_config: taskToEdit.recurrence_config,
       });
-      // Load existing assignments for edit mode
+      // Load existing assignments and dependencies for edit mode
       loadExistingAssignments();
+      loadExistingDependencies();
     } else if (!taskToEdit && open) {
       form.reset({
         name: "",
@@ -248,8 +253,9 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
         recurrence_type: "none",
         recurrence_config: null,
       });
-      // Reset assignees for new tasks
+      // Reset assignees and dependencies for new tasks
       setSelectedAssignees([]);
+      setSelectedDependencies([]);
     }
   }, [taskToEdit, open, form]);
 
@@ -267,6 +273,82 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
     } catch (error) {
       console.error("Error loading assignments:", error);
     }
+  };
+
+  const loadExistingDependencies = async () => {
+    if (!taskToEdit) return;
+    try {
+      const { data, error } = await supabase
+        .from("task_dependencies")
+        .select("depends_on_task_id")
+        .eq("task_id", taskToEdit.id);
+
+      if (!error && data) {
+        setSelectedDependencies(data.map((d) => d.depends_on_task_id));
+      }
+    } catch (error) {
+      console.error("Error loading dependencies:", error);
+    }
+  };
+
+  // Fetch available tasks for dependency selection
+  const fetchAvailableTasks = useCallback(async () => {
+    if (!currentUserId) return;
+    try {
+      setDependenciesLoading(true);
+      const { data, error } = await supabase
+        .from("tasks")
+        .select("id, name")
+        .eq("created_by", currentUserId)
+        .eq("is_active", true)
+        .order("name", { ascending: true });
+
+      if (error) throw error;
+
+      // Filter out current task if editing
+      const filtered = taskToEdit
+        ? (data || []).filter((t) => t.id !== taskToEdit.id)
+        : (data || []);
+
+      setAvailableTasks(filtered);
+    } catch (error: any) {
+      console.error("Error fetching tasks:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load available tasks",
+        variant: "destructive",
+      });
+    } finally {
+      setDependenciesLoading(false);
+    }
+  }, [currentUserId, taskToEdit?.id, toast]);
+
+  // Fetch available tasks when dialog opens
+  useEffect(() => {
+    if (open && currentUserId) {
+      fetchAvailableTasks();
+    }
+  }, [open, currentUserId, fetchAvailableTasks]);
+
+  // Filter tasks based on search query
+  const filteredDependencyTasks = useMemo(() => {
+    if (dependencySearchQuery.length < 2) {
+      return availableTasks.filter((t) => !selectedDependencies.includes(t.id));
+    }
+    const query = dependencySearchQuery.toLowerCase();
+    return availableTasks.filter(
+      (t) =>
+        !selectedDependencies.includes(t.id) &&
+        t.name.toLowerCase().includes(query)
+    );
+  }, [availableTasks, selectedDependencies, dependencySearchQuery]);
+
+  const handleDependencyToggle = (taskId: string) => {
+    setSelectedDependencies((prev) =>
+      prev.includes(taskId)
+        ? prev.filter((id) => id !== taskId)
+        : [...prev, taskId]
+    );
   };
 
   const handleAssigneeToggle = (memberId: string) => {
@@ -387,6 +469,56 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
           }
         }
 
+        // Update dependencies
+        if (selectedDependencies.length > 0) {
+          // Get current dependencies
+          const { data: currentDependencies } = await supabase
+            .from("task_dependencies")
+            .select("depends_on_task_id")
+            .eq("task_id", taskToEdit.id);
+
+          const currentDependencyIds = currentDependencies?.map((d) => d.depends_on_task_id) || [];
+          
+          // Find new dependencies to add
+          const newDependencies = selectedDependencies.filter((id) => !currentDependencyIds.includes(id));
+          
+          // Find dependencies to remove
+          const dependenciesToRemove = currentDependencyIds.filter((id) => !selectedDependencies.includes(id));
+
+          // Remove dependencies
+          if (dependenciesToRemove.length > 0) {
+            const { error: removeError } = await supabase
+              .from("task_dependencies")
+              .delete()
+              .eq("task_id", taskToEdit.id)
+              .in("depends_on_task_id", dependenciesToRemove);
+
+            if (removeError) throw removeError;
+          }
+
+          // Add new dependencies
+          if (newDependencies.length > 0) {
+            const newDependencyRecords = newDependencies.map((dependsOnTaskId) => ({
+              task_id: taskToEdit.id,
+              depends_on_task_id: dependsOnTaskId,
+            }));
+
+            const { error: depError } = await supabase
+              .from("task_dependencies")
+              .insert(newDependencyRecords);
+
+            if (depError) throw depError;
+          }
+        } else {
+          // Remove all dependencies if none selected
+          const { error: removeAllError } = await supabase
+            .from("task_dependencies")
+            .delete()
+            .eq("task_id", taskToEdit.id);
+
+          if (removeAllError) throw removeAllError;
+        }
+
         toast({
           title: "Success!",
           description: "Task updated successfully",
@@ -460,6 +592,20 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
           .insert(assignments);
 
         if (assignError) throw assignError;
+
+        // Create dependencies if any selected
+        if (selectedDependencies.length > 0) {
+          const dependencyRecords = selectedDependencies.map((dependsOnTaskId) => ({
+            task_id: taskData.id,
+            depends_on_task_id: dependsOnTaskId,
+          }));
+
+          const { error: depError } = await supabase
+            .from("task_dependencies")
+            .insert(dependencyRecords);
+
+          if (depError) throw depError;
+        }
 
         const assigneeNames = assigneesToAssign
           .map((id) => organizationMembers.find((m) => m.id === id)?.full_name || "you")
@@ -587,7 +733,7 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
                         onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : undefined)}
                       />
                     </FormControl>
-                    <FormDescription>Daily target quantity</FormDescription>
+                    <FormDescription>Daily target quantity (optional)</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -625,6 +771,103 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
               value={form.watch("recurrence_config")}
               onChange={(config) => form.setValue("recurrence_config", config)}
             />
+
+            {/* Dependencies Section - Only show if we have user ID and tasks available */}
+            {currentUserId && (
+              <div className="space-y-3 pt-4 border-t">
+                <FormLabel>Task Dependencies</FormLabel>
+                <FormDescription>
+                  Select tasks that must be completed before this task can be completed. This task will be blocked until all dependencies are completed.
+                </FormDescription>
+
+                {/* Selected Dependencies */}
+                {selectedDependencies.length > 0 && (
+                  <div className="flex flex-wrap gap-2 p-3 border rounded-md bg-muted/30">
+                    {selectedDependencies.map((taskId) => {
+                      const task = availableTasks.find((t) => t.id === taskId);
+                      if (!task) return null;
+                      return (
+                        <Badge
+                          key={taskId}
+                          variant="secondary"
+                          className="flex items-center gap-2 px-3 py-1.5"
+                        >
+                          <Link2 className="w-3 h-3" />
+                          <span>{task.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDependencyToggle(taskId)}
+                            className="ml-1 hover:bg-destructive/20 rounded-full p-0.5"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Search Input with Autocomplete for Dependencies */}
+                <Popover open={dependencySearchOpen} onOpenChange={setDependencySearchOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-start text-left font-normal"
+                      onClick={() => setDependencySearchOpen(true)}
+                      disabled={dependenciesLoading || availableTasks.length === 0}
+                    >
+                      <Search className="mr-2 h-4 w-4" />
+                      {dependenciesLoading
+                        ? "Loading tasks..."
+                        : availableTasks.length === 0
+                        ? "No other tasks available"
+                        : dependencySearchQuery.length >= 2
+                        ? `Searching for "${dependencySearchQuery}"...`
+                        : "Type at least 2 characters to search for tasks"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[400px] p-0" align="start">
+                    <Command>
+                      <CommandInput
+                        placeholder="Search tasks by name (min 2 characters)..."
+                        value={dependencySearchQuery}
+                        onValueChange={setDependencySearchQuery}
+                      />
+                      <CommandList>
+                        <CommandEmpty>
+                          {dependencySearchQuery.length < 2
+                            ? "Type at least 2 characters to search"
+                            : "No tasks found"}
+                        </CommandEmpty>
+                        <CommandGroup>
+                          {filteredDependencyTasks.map((task) => (
+                            <CommandItem
+                              key={task.id}
+                              value={task.id}
+                              onSelect={() => {
+                                handleDependencyToggle(task.id);
+                                setDependencySearchQuery("");
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  selectedDependencies.includes(task.id)
+                                    ? "opacity-100"
+                                    : "opacity-0"
+                                )}
+                              />
+                              {task.name}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
 
             {/* Assignment Section - Only show if we have user ID */}
             {currentUserId && (

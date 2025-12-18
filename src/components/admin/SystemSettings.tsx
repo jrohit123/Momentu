@@ -30,6 +30,9 @@ export const SystemSettings = ({ user }: SystemSettingsProps) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [orgName, setOrgName] = useState("");
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  // Local state for settings (not saved yet)
+  const [localSettings, setLocalSettings] = useState<Record<string, string | boolean>>({});
   const { toast } = useToast();
 
   useEffect(() => {
@@ -67,6 +70,17 @@ export const SystemSettings = ({ user }: SystemSettingsProps) => {
 
       if (orgSettings) {
         setSettings(orgSettings);
+        // Initialize local settings from fetched settings
+        const initialLocalSettings: Record<string, string | boolean> = {};
+        orgSettings.forEach((s) => {
+          if (s.setting_type === "boolean") {
+            initialLocalSettings[s.setting_key] = s.setting_value === "true";
+          } else {
+            initialLocalSettings[s.setting_key] = s.setting_value || "";
+          }
+        });
+        setLocalSettings(initialLocalSettings);
+        setHasUnsavedChanges(false);
       }
     } catch (error: any) {
       console.error("Error fetching organization and settings:", error);
@@ -108,53 +122,65 @@ export const SystemSettings = ({ user }: SystemSettingsProps) => {
     }
   };
 
-  const handleSettingUpdate = async (settingKey: string, value: string | boolean) => {
+  const handleSettingChange = (settingKey: string, value: string | boolean) => {
+    setLocalSettings((prev) => ({
+      ...prev,
+      [settingKey]: value,
+    }));
+    setHasUnsavedChanges(true);
+  };
+
+  const handleSaveSettings = async () => {
     if (!organization) return;
 
     setSaving(true);
     try {
-      const setting = settings.find((s) => s.setting_key === settingKey);
-      const stringValue = typeof value === "boolean" ? value.toString() : value;
+      // Save all local settings
+      for (const [settingKey, value] of Object.entries(localSettings)) {
+        const setting = settings.find((s) => s.setting_key === settingKey);
+        const stringValue = typeof value === "boolean" ? value.toString() : value;
 
-      if (setting) {
-        // Update existing setting
-        const { error } = await supabase
-          .from("organization_settings")
-          .update({ setting_value: stringValue })
-          .eq("id", setting.id);
+        if (setting) {
+          // Update existing setting
+          const { error } = await supabase
+            .from("organization_settings")
+            .update({ setting_value: stringValue })
+            .eq("id", setting.id);
 
-        if (error) throw error;
+          if (error) throw error;
 
-        setSettings(
-          settings.map((s) => (s.id === setting.id ? { ...s, setting_value: stringValue } : s))
-        );
-      } else {
-        // Create new setting
-        const settingType = typeof value === "boolean" ? "boolean" : "text";
-        const { data, error } = await supabase
-          .from("organization_settings")
-          .insert({
-            organization_id: organization.id,
-            setting_key: settingKey,
-            setting_value: stringValue,
-            setting_type: settingType,
-          })
-          .select()
-          .single();
+          setSettings(
+            settings.map((s) => (s.id === setting.id ? { ...s, setting_value: stringValue } : s))
+          );
+        } else {
+          // Create new setting
+          const settingType = typeof value === "boolean" ? "boolean" : "string";
+          const { data, error } = await supabase
+            .from("organization_settings")
+            .insert({
+              organization_id: organization.id,
+              setting_key: settingKey,
+              setting_value: stringValue,
+              setting_type: settingType,
+            })
+            .select()
+            .single();
 
-        if (error) throw error;
+          if (error) throw error;
 
-        setSettings([...settings, data]);
+          setSettings([...settings, data]);
+        }
       }
 
+      setHasUnsavedChanges(false);
       toast({
         title: "Success",
-        description: "Setting updated successfully",
+        description: "Settings saved successfully",
       });
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message || "Failed to update setting",
+        description: error.message || "Failed to save settings",
         variant: "destructive",
       });
     } finally {
@@ -163,6 +189,10 @@ export const SystemSettings = ({ user }: SystemSettingsProps) => {
   };
 
   const getSettingValue = (key: string): string => {
+    // Check local settings first (unsaved changes)
+    if (localSettings[key] !== undefined) {
+      return typeof localSettings[key] === "string" ? localSettings[key] as string : "";
+    }
     const setting = settings.find((s) => s.setting_key === key);
     // Default to IST for timezone if no setting exists
     if (key === "timezone" && !setting?.setting_value) {
@@ -172,8 +202,21 @@ export const SystemSettings = ({ user }: SystemSettingsProps) => {
   };
 
   const getSettingBoolean = (key: string): boolean => {
+    // Check local settings first (unsaved changes)
+    if (localSettings[key] !== undefined) {
+      return typeof localSettings[key] === "boolean" ? localSettings[key] as boolean : false;
+    }
     const setting = settings.find((s) => s.setting_key === key);
     return setting?.setting_value === "true";
+  };
+
+  const getSettingString = (key: string): string => {
+    // Check local settings first (unsaved changes)
+    if (localSettings[key] !== undefined) {
+      return typeof localSettings[key] === "string" ? localSettings[key] as string : "";
+    }
+    const setting = settings.find((s) => s.setting_key === key);
+    return setting?.setting_value || "";
   };
 
   if (roleLoading || loading) {
@@ -255,7 +298,7 @@ export const SystemSettings = ({ user }: SystemSettingsProps) => {
             <Label htmlFor="timezone">Timezone</Label>
             <Select
               value={getSettingValue("timezone")}
-              onValueChange={(value) => handleSettingUpdate("timezone", value)}
+              onValueChange={(value) => handleSettingChange("timezone", value)}
               disabled={saving}
             >
               <SelectTrigger id="timezone">
@@ -285,7 +328,7 @@ export const SystemSettings = ({ user }: SystemSettingsProps) => {
             <Label htmlFor="date-format">Date Format</Label>
             <Select
               value={getSettingValue("date_format")}
-              onValueChange={(value) => handleSettingUpdate("date_format", value)}
+              onValueChange={(value) => handleSettingChange("date_format", value)}
               disabled={saving}
             >
               <SelectTrigger id="date-format">
@@ -315,25 +358,104 @@ export const SystemSettings = ({ user }: SystemSettingsProps) => {
             <Switch
               id="allow-upward-delegation"
               checked={getSettingBoolean("allow_upward_delegation")}
-              onCheckedChange={(checked) => handleSettingUpdate("allow_upward_delegation", checked)}
+              onCheckedChange={(checked) => handleSettingChange("allow_upward_delegation", checked)}
               disabled={saving}
             />
           </div>
 
-          {/* Task Approval Setting */}
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="require-approval">Require Task Approval</Label>
-              <p className="text-xs text-muted-foreground">
-                Require manager approval for task completions before they are marked as done
-              </p>
-            </div>
-            <Switch
-              id="require-approval"
-              checked={getSettingBoolean("require_task_approval")}
-              onCheckedChange={(checked) => handleSettingUpdate("require_task_approval", checked)}
+          {/* Save Button */}
+          <div className="flex justify-end pt-4 border-t">
+            <Button 
+              onClick={handleSaveSettings} 
+              disabled={saving || !hasUnsavedChanges}
+              className="min-w-[120px]"
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  Save Changes
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Email Notifications Card */}
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Settings className="w-5 h-5" />
+            Email Notifications
+          </CardTitle>
+          <CardDescription>
+            Configure daily task completion summary emails
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Email Notification Time */}
+          <div className="space-y-2">
+            <Label htmlFor="email-notification-time">Notification Time</Label>
+            <Input
+              id="email-notification-time"
+              type="time"
+              value={getSettingString("email_notification_time") || "18:00"}
+              onChange={(e) => handleSettingChange("email_notification_time", e.target.value)}
               disabled={saving}
+              className="w-40"
             />
+            <p className="text-xs text-muted-foreground">
+              Time of day when daily completion summary emails are sent (24-hour format)
+            </p>
+          </div>
+
+          {/* Email Notification Day Preference */}
+          <div className="space-y-2">
+            <Label htmlFor="email-notification-day">Email Day Preference</Label>
+            <Select
+              value={getSettingString("email_notification_day") || "same"}
+              onValueChange={(value) => handleSettingChange("email_notification_day", value)}
+              disabled={saving}
+            >
+              <SelectTrigger className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="same">Same Day (End of day summary)</SelectItem>
+                <SelectItem value="previous">Previous Day (Next morning summary)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {getSettingString("email_notification_day") === "previous" 
+                ? "Emails will be sent the next morning for the previous day's tasks"
+                : "Emails will be sent at the end of the day for that day's tasks"}
+            </p>
+          </div>
+
+          {/* Save Button */}
+          <div className="flex justify-end pt-4 border-t">
+            <Button 
+              onClick={handleSaveSettings} 
+              disabled={saving || !hasUnsavedChanges}
+              className="min-w-[120px]"
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  Save Changes
+                </>
+              )}
+            </Button>
           </div>
         </CardContent>
       </Card>

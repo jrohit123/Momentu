@@ -311,8 +311,75 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
     originalDate?: string
   ) => {
     try {
-      // scheduledDate is when the task was supposed to be done (original due date)
+      // Check dependencies before allowing completion
       const scheduledDate = originalDate || format(targetDate, "yyyy-MM-dd");
+      
+      // Get the task ID from the assignment
+      const { data: assignment, error: assignError } = await supabase
+        .from("task_assignments")
+        .select("task_id")
+        .eq("id", assignmentId)
+        .single();
+
+      if (assignError) throw assignError;
+      if (!assignment) throw new Error("Assignment not found");
+
+      // Check if task has dependencies
+      const { data: dependencies, error: depError } = await supabase
+        .from("task_dependencies")
+        .select("depends_on_task_id")
+        .eq("task_id", assignment.task_id);
+
+      if (depError) throw depError;
+
+      // If there are dependencies, check if they're all completed
+      if (dependencies && dependencies.length > 0) {
+        const dependencyTaskIds = dependencies.map((d) => d.depends_on_task_id);
+        
+        // Get all assignments for the dependency tasks assigned to the same user
+        const { data: dependencyAssignments, error: depAssignError } = await supabase
+          .from("task_assignments")
+          .select("id, task_id")
+          .in("task_id", dependencyTaskIds)
+          .eq("assigned_to", userId);
+
+        if (depAssignError) throw depAssignError;
+
+        if (dependencyAssignments && dependencyAssignments.length > 0) {
+          // Check if all dependency tasks are completed for the scheduled date
+          const depAssignmentIds = dependencyAssignments.map((a) => a.id);
+          const { data: depCompletions, error: depCompError } = await supabase
+            .from("task_completions")
+            .select("assignment_id, status")
+            .in("assignment_id", depAssignmentIds)
+            .eq("scheduled_date", scheduledDate)
+            .in("status", ["completed", "partial"]); // Partial also counts as progress
+
+          if (depCompError) throw depCompError;
+
+          // Check if all dependencies are completed
+          const completedDepIds = new Set(depCompletions?.map((c) => c.assignment_id) || []);
+          const incompleteDeps = dependencyAssignments.filter(
+            (a) => !completedDepIds.has(a.id)
+          );
+
+          if (incompleteDeps.length > 0) {
+            // Get task names for incomplete dependencies
+            const { data: incompleteTasks, error: taskError } = await supabase
+              .from("tasks")
+              .select("name")
+              .in("id", incompleteDeps.map((a) => a.task_id));
+
+            if (taskError) throw taskError;
+
+            const taskNames = incompleteTasks?.map((t) => t.name).join(", ") || "dependencies";
+            throw new Error(
+              `Cannot complete this task. The following dependencies must be completed first: ${taskNames}`
+            );
+          }
+        }
+      }
+
       // completionDate is when it's actually being completed (today)
       const completionDate = format(targetDate, "yyyy-MM-dd");
 

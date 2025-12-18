@@ -17,6 +17,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ChevronLeft, ChevronRight, Download, FileSpreadsheet, FileText, Search, X } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -66,6 +73,9 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     taskDescription: string | null;
     benchmark: number | null;
   } | null>(null);
+  
+  // State for month completion breakdown dialog
+  const [breakdownDialogOpen, setBreakdownDialogOpen] = useState(false);
   
   // Function to mark task complete for a specific date
   const handleTaskStatusUpdate = async (
@@ -165,74 +175,6 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     }
   }, [selectedSubordinateId, subordinates, teamStats, tasks]);
 
-  // Calculate day-wise completion percentages
-  const dayWiseCompletion = useMemo(() => {
-    const dayStats = new Map<string, { completed: number; scheduled: number; percentage: number }>();
-    
-    daysInMonth.forEach((day) => {
-      const dateStr = format(day, "yyyy-MM-dd");
-      let completed = 0;
-      let scheduled = 0;
-      
-      filteredTasks.forEach((taskData) => {
-        const status = taskData.dailyStatuses.get(dateStr);
-        const quantity = taskData.dailyQuantities.get(dateStr) || null;
-        const benchmark = taskData.assignment.task.benchmark || null;
-        
-        // Only count if task is scheduled for this day (not NA)
-        if (status && status !== "not_applicable") {
-          scheduled++;
-          
-          if (status === "completed") {
-            completed += 1;
-          } else if (status === "partial" && quantity !== null && benchmark !== null && benchmark > 0) {
-            // Add completion percentage for partial tasks
-            completed += quantity / benchmark;
-          }
-        }
-      });
-      
-      const percentage = scheduled > 0 ? Math.round((completed / scheduled) * 100) : 0;
-      dayStats.set(dateStr, { completed, scheduled, percentage });
-    });
-    
-    return dayStats;
-  }, [filteredTasks, daysInMonth]);
-
-  // Calculate month-wise completion percentage
-  const monthWiseCompletion = useMemo(() => {
-    let totalCompleted = 0;
-    let totalScheduled = 0;
-    
-    daysInMonth.forEach((day) => {
-      const dateStr = format(day, "yyyy-MM-dd");
-      const dayStat = dayWiseCompletion.get(dateStr);
-      
-      if (dayStat) {
-        // For month-wise, we need to recalculate including delayed tasks
-        filteredTasks.forEach((taskData) => {
-          const status = taskData.dailyStatuses.get(dateStr);
-          const quantity = taskData.dailyQuantities.get(dateStr) || null;
-          const benchmark = taskData.assignment.task.benchmark || null;
-          
-          if (status && status !== "not_applicable") {
-            totalScheduled++;
-            
-            if (status === "completed") {
-              totalCompleted += 1;
-            } else if (status === "partial" && quantity !== null && benchmark !== null && benchmark > 0) {
-              totalCompleted += quantity / benchmark;
-            } else if (status === "delayed") {
-              totalCompleted += 0.5;
-            }
-          }
-        });
-      }
-    });
-    
-    return totalScheduled > 0 ? Math.round((totalCompleted / totalScheduled) * 100) : 0;
-  }, [filteredTasks, daysInMonth, dayWiseCompletion]);
-  
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);
   const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
@@ -281,6 +223,107 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
       return true;
     });
   }, [tasks, searchQuery, categoryFilter, statusFilter]);
+
+  // Calculate day-wise completion percentages
+  const dayWiseCompletion = useMemo(() => {
+    const dayStats = new Map<string, { completed: number; scheduled: number; percentage: number }>();
+    
+    daysInMonth.forEach((day) => {
+      const dateStr = format(day, "yyyy-MM-dd");
+      let completed = 0;
+      let scheduled = 0;
+      
+      filteredTasks.forEach((taskData) => {
+        const status = taskData.dailyStatuses.get(dateStr);
+        const quantity = taskData.dailyQuantities.get(dateStr) || null;
+        const benchmark = taskData.assignment.task.benchmark || null;
+        
+        // Only count if task is scheduled for this day (not NA)
+        if (status && status !== "not_applicable") {
+          scheduled++;
+          
+          if (status === "completed") {
+            completed += 1;
+          } else if (status === "partial" && quantity !== null && benchmark !== null && benchmark > 0) {
+            // Add completion percentage for partial tasks
+            completed += quantity / benchmark;
+          }
+        }
+      });
+      
+      const percentage = scheduled > 0 ? Math.round((completed / scheduled) * 100) : 0;
+      dayStats.set(dateStr, { completed, scheduled, percentage });
+    });
+    
+    return dayStats;
+  }, [filteredTasks, daysInMonth]);
+
+  // Calculate month-wise completion percentage and detailed breakdown
+  const { monthWiseCompletion, breakdown } = useMemo(() => {
+    let totalCompleted = 0;
+    let totalScheduled = 0;
+    let completedCount = 0;
+    let partialCount = 0;
+    let partialTotal = 0;
+    let delayedCount = 0;
+    let notDoneCount = 0;
+    let pendingCount = 0;
+    let scheduledCount = 0;
+    
+    // Calculate across all days in the month
+    daysInMonth.forEach((day) => {
+      const dateStr = format(day, "yyyy-MM-dd");
+      
+      filteredTasks.forEach((taskData) => {
+        const status = taskData.dailyStatuses.get(dateStr);
+        const quantity = taskData.dailyQuantities.get(dateStr) || null;
+        const benchmark = taskData.assignment.task.benchmark || null;
+        
+        // Only count scheduled tasks (not NA)
+        if (status && status !== "not_applicable") {
+          totalScheduled++;
+          
+          if (status === "completed") {
+            totalCompleted += 1;
+            completedCount++;
+          } else if (status === "partial" && quantity !== null && benchmark !== null && benchmark > 0) {
+            // Add completion percentage for partial tasks
+            const partialValue = quantity / benchmark;
+            totalCompleted += partialValue;
+            partialCount++;
+            partialTotal += partialValue;
+          } else if (status === "delayed") {
+            // Delayed tasks count as 0.5
+            totalCompleted += 0.5;
+            delayedCount++;
+          } else if (status === "not_done") {
+            notDoneCount++;
+          } else if (status === "pending") {
+            pendingCount++;
+          } else if (status === "scheduled") {
+            scheduledCount++;
+          }
+        }
+      });
+    });
+    
+    const percentage = totalScheduled > 0 ? Math.round((totalCompleted / totalScheduled) * 100) : 0;
+    
+    return {
+      monthWiseCompletion: percentage,
+      breakdown: {
+        totalScheduled,
+        totalCompleted,
+        completedCount,
+        partialCount,
+        partialTotal,
+        delayedCount,
+        notDoneCount,
+        pendingCount,
+        scheduledCount,
+      },
+    };
+  }, [filteredTasks, daysInMonth]);
 
   const previousMonth = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
@@ -369,42 +412,53 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
   const hasActiveFilters = searchQuery.trim() || categoryFilter !== "all" || statusFilter !== "all" || selectedSubordinateId !== "self";
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 sm:space-y-6 animate-fade-in">
       {/* Month Navigation */}
       <Card className="shadow-lg">
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="font-heading text-2xl">
-                {format(currentDate, "MMMM yyyy")}
-                {selectedSubordinateId !== "self" && (
-                  <span className="text-lg text-muted-foreground ml-2">
-                    - {selectedUserStats.fullName} ({selectedUserStats.completionPercentage}%)
-                  </span>
-                )}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <CardTitle className="font-heading text-xl sm:text-2xl">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+                  <span>{format(currentDate, "MMMM yyyy")}</span>
+                  {selectedSubordinateId !== "self" && (
+                    <span className="text-base sm:text-lg text-muted-foreground">
+                      - {selectedUserStats.fullName} ({selectedUserStats.completionPercentage}%)
+                    </span>
+                  )}
+                  {!loading && tasks.length > 0 && (
+                    <button
+                      onClick={() => setBreakdownDialogOpen(true)}
+                      className="text-base sm:text-lg text-primary font-semibold hover:underline cursor-pointer"
+                      title="Click to view calculation breakdown"
+                    >
+                      <span className="hidden sm:inline">| </span>Month: {monthWiseCompletion}%
+                    </button>
+                  )}
+                </div>
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-xs sm:text-sm">
                 {selectedSubordinateId === "self" 
                   ? "Monthly task completion matrix" 
                   : `Viewing ${selectedUserStats.fullName.toLowerCase()} tasks`}
               </CardDescription>
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={previousMonth}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button variant="outline" size="sm" onClick={previousMonth} className="h-8">
                 <ChevronLeft className="w-4 h-4" />
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setCurrentDate(new Date())}>
+              <Button variant="outline" size="sm" onClick={() => setCurrentDate(new Date())} className="h-8 text-xs sm:text-sm">
                 Today
               </Button>
-              <Button variant="outline" size="sm" onClick={nextMonth}>
+              <Button variant="outline" size="sm" onClick={nextMonth} className="h-8">
                 <ChevronRight className="w-4 h-4" />
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button size="sm" className="ml-4" disabled={loading || tasks.length === 0}>
-                <Download className="w-4 h-4 mr-2" />
-                Export
-              </Button>
+                  <Button size="sm" className="h-8" disabled={loading || tasks.length === 0}>
+                    <Download className="w-4 h-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Export</span>
+                  </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={handleExportExcel}>
@@ -420,14 +474,14 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-3 sm:p-6">
           {/* Filters */}
           {!loading && (
-            <div className="mb-6 flex flex-wrap items-center gap-4">
+            <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 sm:gap-4">
               {/* Subordinate Filter - Only show if user has subordinates */}
               {subordinates.length > 0 && (
                 <Select value={selectedSubordinateId} onValueChange={setSelectedSubordinateId}>
-                  <SelectTrigger className="w-[200px]">
+                  <SelectTrigger className="w-full sm:w-[200px]">
                     <SelectValue placeholder="View Tasks For" />
                   </SelectTrigger>
                   <SelectContent>
@@ -447,7 +501,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
 
               {/* Search Input */}
               {tasks.length > 0 && (
-                <div className="relative flex-1 min-w-[200px]">
+                <div className="relative flex-1 min-w-0">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
                   <Input
                     type="text"
@@ -470,7 +524,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
               {/* Category Filter */}
               {tasks.length > 0 && (
                 <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-[180px]">
+                  <SelectTrigger className="w-full sm:w-[180px]">
                     <SelectValue placeholder="All Categories" />
                   </SelectTrigger>
                   <SelectContent>
@@ -487,7 +541,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
               {/* Status Filter */}
               {tasks.length > 0 && (
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[180px]">
+                  <SelectTrigger className="w-full sm:w-[180px]">
                     <SelectValue placeholder="All Statuses" />
                   </SelectTrigger>
                   <SelectContent>
@@ -509,7 +563,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
                   variant="outline"
                   size="sm"
                   onClick={clearFilters}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 w-full sm:w-auto"
                 >
                   <X className="w-4 h-4" />
                   Clear Filters
@@ -518,7 +572,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
 
               {/* Results Count */}
               {hasActiveFilters && tasks.length > 0 && (
-                <div className="text-sm text-muted-foreground">
+                <div className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
                   Showing {filteredTasks.length} of {tasks.length} tasks
                 </div>
               )}
@@ -538,39 +592,41 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
               <div className="text-muted-foreground">No tasks match your filters</div>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="border-b-2 border-border">
-                    <th className="sticky left-0 z-10 bg-card px-4 py-3 text-left font-semibold text-sm">
-                      Task Name
-                    </th>
-                    <th className="px-2 py-3 text-center font-semibold text-sm w-24">Frequency</th>
-                    <th className="px-2 py-3 text-center font-semibold text-sm w-20">Target</th>
-                    {daysInMonth.map((day) => {
-                      const workingDayInfo = isWorkingDay(day);
-                      return (
-                        <th
-                          key={day.toString()}
-                          className={cn(
-                            "px-2 py-3 text-center text-xs font-medium w-12",
-                            isToday(day) && "bg-primary/10",
-                            !workingDayInfo.isWorkingDay && "bg-holiday-weekly-off/50"
-                          )}
-                        >
-                          <div>{format(day, "EEE")}</div>
-                          <div className="font-bold">{format(day, "d")}</div>
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
+            <div className="overflow-x-auto -mx-3 sm:mx-0">
+              <div className="inline-block min-w-full align-middle">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="border-b-2 border-border">
+                      <th className="sticky left-0 z-10 bg-card px-2 sm:px-4 py-1.5 text-left font-semibold text-xs sm:text-sm w-48 sm:w-72 min-w-[12rem] sm:min-w-[18rem]">
+                        Task Name
+                      </th>
+                      <th className="px-1 py-1.5 text-center font-semibold text-xs sm:text-sm w-16 sm:w-24">Frequency</th>
+                      <th className="px-1 py-1.5 text-center font-semibold text-xs sm:text-sm w-16 sm:w-20">Target</th>
+                      {daysInMonth.map((day) => {
+                        const workingDayInfo = isWorkingDay(day);
+                        const isTodayDate = isToday(day);
+                        return (
+                          <th
+                            key={day.toString()}
+                            className={cn(
+                              "px-0.5 sm:px-1 py-1.5 text-center text-[10px] sm:text-xs font-medium w-10 sm:w-12",
+                              isTodayDate && "bg-primary/20 border-l-2 border-r-2 border-primary",
+                              !workingDayInfo.isWorkingDay && !isTodayDate && "bg-holiday-weekly-off/50"
+                            )}
+                          >
+                            <div className="hidden sm:block">{format(day, "EEE")}</div>
+                            <div className="font-bold">{format(day, "d")}</div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
                 <tbody>
                   {filteredTasks.map((taskData) => {
                     const task = taskData.assignment.task;
                     return (
                       <tr key={taskData.assignment.id} className="border-b border-border hover:bg-muted/30 transition-colors">
-                        <td className="sticky left-0 z-10 bg-card px-4 py-3 font-medium">
+                        <td className="sticky left-0 z-10 bg-card px-2 py-1.5 font-medium">
                           <button
                             onClick={() => {
                               setSelectedTaskForHistory({
@@ -581,17 +637,18 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
                               });
                               setHistoryDialogOpen(true);
                             }}
-                            className="hover:underline text-left flex items-center gap-2 group"
+                            className="hover:underline text-left flex items-center gap-1 sm:gap-2 group text-xs sm:text-sm"
                             title="Click to view daily task history"
                           >
-                            {task.name}
-                            <FileText className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <span className="truncate">{task.name}</span>
+                            <FileText className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                           </button>
                         </td>
-                        <td className="px-2 py-3 text-center text-sm text-muted-foreground">
-                          {getFrequencyLabel(task.recurrence_type)}
+                        <td className="px-1 py-1.5 text-center text-xs sm:text-sm text-muted-foreground">
+                          <span className="hidden sm:inline">{getFrequencyLabel(task.recurrence_type)}</span>
+                          <span className="sm:hidden">{getFrequencyLabel(task.recurrence_type).charAt(0)}</span>
                         </td>
-                        <td className="px-2 py-3 text-center text-sm font-medium">
+                        <td className="px-1 py-1.5 text-center text-xs sm:text-sm text-muted-foreground">
                           {task.benchmark || "-"}
                         </td>
                         {daysInMonth.map((day) => {
@@ -611,9 +668,9 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
                             <td
                               key={day.toString()}
                               className={cn(
-                                "px-2 py-3 text-center",
-                                isTodayDate && "bg-primary/10",
-                                !workingDayInfo.isWorkingDay && "bg-holiday-weekly-off/50"
+                                "px-1 py-1.5 text-center",
+                                isTodayDate && "bg-primary/20 border-l-2 border-r-2 border-primary",
+                                !workingDayInfo.isWorkingDay && !isTodayDate && "bg-holiday-weekly-off/50"
                               )}
                             >
                               <StatusIndicator
@@ -641,52 +698,84 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
                       </tr>
                     );
                   })}
+                  {/* Day-wise Completion % Row */}
+                  <tr className="border-t-2 border-border bg-green-100 font-semibold">
+                    <td className="sticky left-0 z-10 bg-muted/50 px-2 py-1.5 text-xs sm:text-sm font-semibold">
+                      <span className="hidden sm:inline">Day-wise Completion %</span>
+                      <span className="sm:hidden">Day %</span>
+                    </td>
+                    <td className="px-1 py-1.5 text-center text-xs sm:text-sm">-</td>
+                    <td className="px-1 py-1.5 text-center text-xs sm:text-sm">-</td>
+                    {daysInMonth.map((day) => {
+                      const dateStr = format(day, "yyyy-MM-dd");
+                      const dayStat = dayWiseCompletion.get(dateStr);
+                      const percentage = dayStat?.percentage || 0;
+                      const workingDayInfo = isWorkingDay(day);
+                      const isTodayDate = isToday(day);
+                      
+                      return (
+                        <td
+                          key={day.toString()}
+                          className={cn(
+                            "px-0.5 sm:px-1 py-1.5 text-center text-xs sm:text-sm font-semibold",
+                            isTodayDate && "bg-primary/20 border-l-2 border-r-2 border-primary",
+                            !workingDayInfo.isWorkingDay && !isTodayDate && "bg-holiday-weekly-off/50"
+                          )}
+                        >
+                          {dayStat && dayStat.scheduled > 0 ? `${percentage}%` : "-"}
+                        </td>
+                      );
+                    })}
+                  </tr>
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
           {/* Legend */}
-          <div className="mt-6 flex flex-wrap items-center gap-4 text-sm">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded bg-success flex items-center justify-center text-white font-bold">
+          <div className="mt-4 sm:mt-6 flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded bg-success flex items-center justify-center text-white font-bold text-[10px] sm:text-sm">
                 ✓
               </div>
               <span>Completed</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded bg-warning flex items-center justify-center text-white font-bold">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded bg-warning flex items-center justify-center text-white font-bold text-[10px] sm:text-sm">
                 ◐ 
               </div>
               <span>Partial</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded bg-destructive flex items-center justify-center text-white font-bold">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded bg-destructive flex items-center justify-center text-white font-bold text-[10px] sm:text-sm">
                 ✗
               </div>
               <span>Not Done</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded bg-warning flex items-center justify-center text-white font-bold">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded bg-warning flex items-center justify-center text-white font-bold text-[10px] sm:text-sm">
                 !
               </div>
               <span>Pending</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded bg-status-na flex items-center justify-center text-white text-xs">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded bg-status-na flex items-center justify-center text-white text-[8px] sm:text-xs">
                 NA
               </div>
-              <span>Not Applicable</span>
+              <span className="hidden sm:inline">Not Applicable</span>
+              <span className="sm:hidden">N/A</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded bg-orange-500 flex items-center justify-center text-white font-bold">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded bg-orange-500 flex items-center justify-center text-white font-bold text-[10px] sm:text-sm">
                 ⏱
               </div>
               <span>Delayed</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded bg-holiday-weekly-off border border-border"></div>
-              <span>Weekly Off/Holiday (WO/H)</span>
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded bg-holiday-weekly-off border border-border"></div>
+              <span className="hidden sm:inline">Weekly Off/Holiday (WO/H)</span>
+              <span className="sm:hidden">WO/H</span>
             </div>
           </div>
         </CardContent>
@@ -730,6 +819,142 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
           benchmark={selectedTaskForHistory.benchmark}
         />
       )}
+
+      {/* Month Completion Breakdown Dialog */}
+      <Dialog open={breakdownDialogOpen} onOpenChange={setBreakdownDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Month Completion Calculation Breakdown</DialogTitle>
+            <DialogDescription>
+              Detailed breakdown of how the {monthName} completion percentage is calculated
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            {/* Summary */}
+            <div className="bg-muted/50 p-4 rounded-lg">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-lg">Total Completion:</span>
+                <span className="font-bold text-2xl text-primary">{monthWiseCompletion}%</span>
+              </div>
+            </div>
+
+            {/* Breakdown Details */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="border rounded-lg p-3">
+                  <div className="text-sm text-muted-foreground">Total Scheduled Tasks</div>
+                  <div className="text-2xl font-bold">{breakdown.totalScheduled}</div>
+                </div>
+                <div className="border rounded-lg p-3">
+                  <div className="text-sm text-muted-foreground">Total Completed Value</div>
+                  <div className="text-2xl font-bold">{breakdown.totalCompleted.toFixed(2)}</div>
+                </div>
+              </div>
+
+              <div className="border-t pt-3">
+                <h4 className="font-semibold mb-2">Status Breakdown:</h4>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between p-2 bg-success/10 rounded">
+                    <div className="flex items-center gap-2">
+                      <span className="w-4 h-4 rounded bg-success flex items-center justify-center text-white text-xs">✓</span>
+                      <span>Completed</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold">{breakdown.completedCount}</div>
+                      <div className="text-xs text-muted-foreground">Contribution: {breakdown.completedCount.toFixed(2)}</div>
+                    </div>
+                  </div>
+
+                  {breakdown.partialCount > 0 && (
+                    <div className="flex items-center justify-between p-2 bg-warning/10 rounded">
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 rounded bg-warning flex items-center justify-center text-white text-xs">◐</span>
+                        <span>Partial</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-semibold">{breakdown.partialCount}</div>
+                        <div className="text-xs text-muted-foreground">Contribution: {breakdown.partialTotal.toFixed(2)}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {breakdown.delayedCount > 0 && (
+                    <div className="flex items-center justify-between p-2 bg-orange-500/10 rounded">
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 rounded bg-orange-500 flex items-center justify-center text-white text-xs">⏱</span>
+                        <span>Delayed</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-semibold">{breakdown.delayedCount}</div>
+                        <div className="text-xs text-muted-foreground">Contribution: {(breakdown.delayedCount * 0.5).toFixed(2)} (0.5 each)</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {breakdown.notDoneCount > 0 && (
+                    <div className="flex items-center justify-between p-2 bg-destructive/10 rounded">
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 rounded bg-destructive flex items-center justify-center text-white text-xs">✗</span>
+                        <span>Not Done</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-semibold">{breakdown.notDoneCount}</div>
+                        <div className="text-xs text-muted-foreground">Contribution: 0</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {breakdown.pendingCount > 0 && (
+                    <div className="flex items-center justify-between p-2 bg-warning/10 rounded">
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 rounded bg-warning flex items-center justify-center text-white text-xs">!</span>
+                        <span>Pending</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-semibold">{breakdown.pendingCount}</div>
+                        <div className="text-xs text-muted-foreground">Contribution: 0</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {breakdown.scheduledCount > 0 && (
+                    <div className="flex items-center justify-between p-2 bg-muted/50 rounded">
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 rounded bg-muted flex items-center justify-center text-muted-foreground text-xs">○</span>
+                        <span>Scheduled</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-semibold">{breakdown.scheduledCount}</div>
+                        <div className="text-xs text-muted-foreground">Contribution: 0</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Formula */}
+              <div className="border-t pt-3 mt-4">
+                <h4 className="font-semibold mb-2">Calculation Formula:</h4>
+                <div className="bg-muted/30 p-3 rounded-lg font-mono text-sm">
+                  <div className="mb-1">Completion % = (Total Completed Value / Total Scheduled Tasks) × 100</div>
+                  <div className="text-muted-foreground">
+                    = ({breakdown.totalCompleted.toFixed(2)} / {breakdown.totalScheduled}) × 100
+                  </div>
+                  <div className="text-primary font-semibold mt-1">
+                    = {monthWiseCompletion}%
+                  </div>
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground space-y-1">
+                  <div>• Completed tasks count as 1.0</div>
+                  <div>• Partial tasks count as (quantity / benchmark)</div>
+                  <div>• Delayed tasks count as 0.5</div>
+                  <div>• Not Done, Pending, and Scheduled tasks count as 0</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -751,7 +976,7 @@ const StatusIndicator = ({ status, isWeeklyOff, notes, quantity, benchmark, comp
   // Only show "-" if it's a weekly off AND there's no completion (status is "not_applicable" or "scheduled")
   if (isWeeklyOff && (status === "not_applicable" || status === "scheduled")) {
     return (
-      <div className="w-8 h-8 mx-auto rounded flex items-center justify-center text-xs text-muted-foreground">
+      <div className="w-6 h-6 sm:w-8 sm:h-8 mx-auto rounded flex items-center justify-center text-[10px] sm:text-xs text-muted-foreground">
         -
       </div>
     );
@@ -773,10 +998,10 @@ const StatusIndicator = ({ status, isWeeklyOff, notes, quantity, benchmark, comp
     <div
       onClick={canEdit && onClick ? onClick : undefined}
       className={cn(
-        "w-8 h-8 mx-auto rounded flex items-center justify-center font-bold transition-all",
+        "w-6 h-6 sm:w-8 sm:h-8 mx-auto rounded flex items-center justify-center font-bold transition-all text-[10px] sm:text-sm",
         config.bg,
         config.text,
-        canEdit && onClick && "hover:scale-110 cursor-pointer",
+        canEdit && onClick && "hover:scale-110 cursor-pointer active:scale-95",
         !canEdit || !onClick ? "cursor-default" : ""
       )}
       title={canEdit && onClick ? "Click to update status" : undefined}
