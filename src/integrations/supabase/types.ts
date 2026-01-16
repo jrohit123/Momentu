@@ -342,10 +342,13 @@ export type Database = {
       }
       task_completions: {
         Row: {
+          approval_status: string
+          approved_by: string | null
           assignment_id: string
           completion_date: string
           created_at: string
           id: string
+          manager_comment: string | null
           notes: string | null
           quantity_completed: number | null
           scheduled_date: string
@@ -353,10 +356,13 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          approval_status?: string
+          approved_by?: string | null
           assignment_id: string
           completion_date: string
           created_at?: string
           id?: string
+          manager_comment?: string | null
           notes?: string | null
           quantity_completed?: number | null
           scheduled_date: string
@@ -364,6 +370,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          approval_status?: string
+          approved_by?: string | null
           assignment_id?: string
           completion_date?: string
           created_at?: string

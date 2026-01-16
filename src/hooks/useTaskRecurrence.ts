@@ -70,13 +70,16 @@ export const useTaskRecurrence = () => {
         return isSameDay(new Date(task.created_at), targetDate);
       }
 
-      // Handle custom recurrence
-      if (!task.recurrence_config) {
+      // For custom recurrence, require recurrence_config
+      if (task.recurrence_type === "custom" && !task.recurrence_config) {
         return false;
       }
 
+      // For simple recurrence types (daily, weekly, monthly, yearly), 
+      // create a default config if one doesn't exist
+      const config = task.recurrence_config || { interval: 1 };
+
       try {
-        const config = task.recurrence_config;
         // Create dtstart in UTC to avoid timezone issues
         // Parse the created_at date and create a UTC date at midnight
         const createdDate = new Date(task.created_at);

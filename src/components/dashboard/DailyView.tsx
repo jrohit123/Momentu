@@ -14,8 +14,12 @@ import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useDailyTasks } from "@/hooks/useDailyTasks";
 import { useWorkingDays } from "@/hooks/useWorkingDays";
+import { useUserRole } from "@/hooks/useUserRole";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { TaskApprovalBadge } from "@/components/tasks/TaskApprovalBadge";
+import { TaskApprovalDialog } from "@/components/tasks/TaskApprovalDialog";
+import { Loader2 } from "lucide-react";
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
 
@@ -29,11 +33,13 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
   const [fullName, setFullName] = useState<string | null>(null);
   const { tasks, pendingTasks, loading, markTaskComplete } = useDailyTasks(user.id, today);
   const { isWorkingDay } = useWorkingDays(user.id);
+  const { isManager } = useUserRole(user.id);
   
   // Track modified tasks for bulk update
   const [modifiedTasks, setModifiedTasks] = useState<Map<string, { status: TaskStatus; quantity?: number; notes?: string; originalDate?: string }>>(new Map());
   const [saving, setSaving] = useState(false);
   const [dependenciesByTask, setDependenciesByTask] = useState<Record<string, Array<{ id: string; name: string }>>>({});
+  const [employeeNames, setEmployeeNames] = useState<Record<string, string>>({});
   
   const workingDayInfo = isWorkingDay(today);
 
@@ -52,6 +58,44 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
 
     fetchUserProfile();
   }, [user.id]);
+
+  // Fetch employee names for subordinate tasks
+  useEffect(() => {
+    const fetchEmployeeNames = async () => {
+      if (!isManager) return;
+      
+      const allAssignedToIds = [
+        ...tasks.map(t => t.assignment.assigned_to),
+        ...pendingTasks.map(t => t.assignment.assigned_to)
+      ].filter((id, index, self) => self.indexOf(id) === index && id !== user.id);
+
+      if (allAssignedToIds.length === 0) {
+        setEmployeeNames({});
+        return;
+      }
+
+      try {
+        const { data: employees, error } = await supabase
+          .from("users")
+          .select("id, full_name")
+          .in("id", allAssignedToIds);
+
+        if (!error && employees) {
+          const namesMap: Record<string, string> = {};
+          employees.forEach((emp) => {
+            if (emp.full_name) {
+              namesMap[emp.id] = emp.full_name;
+            }
+          });
+          setEmployeeNames(namesMap);
+        }
+      } catch (error) {
+        console.error("Error fetching employee names:", error);
+      }
+    };
+
+    fetchEmployeeNames();
+  }, [isManager, tasks, pendingTasks, user.id]);
 
   // Fetch dependencies for all tasks
   useEffect(() => {
@@ -116,22 +160,28 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
     let completedCount = 0;
     
     tasks.forEach((task) => {
-      if (task.status === "completed") {
-        totalCompleted += 1;
-        completedCount++;
-      } else if (task.status === "partial") {
-        const quantity = task.completion?.quantity_completed || 0;
-        const benchmark = task.assignment.task.benchmark;
-        if (benchmark !== null && benchmark > 0) {
-          totalCompleted += quantity / benchmark;
-        } else {
-          // If no benchmark, treat partial as 0.5
+      // Only count tasks that are approved (or don't require approval for auto-approved orgs)
+      const isApproved = task.completion?.approval_status === 'approved';
+
+      if (isApproved) {
+        if (task.status === "completed") {
+          totalCompleted += 1;
+          completedCount++;
+        } else if (task.status === "partial") {
+          const quantity = task.completion?.quantity_completed || 0;
+          const benchmark = task.assignment.task.benchmark;
+          if (benchmark !== null && benchmark > 0) {
+            totalCompleted += quantity / benchmark;
+          } else {
+            // If no benchmark, treat partial as 0.5
+            totalCompleted += 0.5;
+          }
+        } else if (task.status === "delayed") {
           totalCompleted += 0.5;
         }
-      } else if (task.status === "delayed") {
-        totalCompleted += 0.5;
       }
       // not_done, pending, scheduled, not_applicable all count as 0
+      // Also tasks that are completed but not yet approved count as 0
     });
     
     const completion = total > 0 ? Math.round((totalCompleted / total) * 100) : 0;
@@ -334,10 +384,16 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
                   key={dailyTask.assignment.id}
                   dailyTask={dailyTask}
                   currentUserId={user.id}
+                  isManager={isManager}
                   onStatusChange={handleTaskChange}
                   onIndividualUpdate={handleIndividualUpdate}
                   isModified={modifiedTasks.has(dailyTask.assignment.id)}
                   dependencies={dependenciesByTask[dailyTask.assignment.task.id] || []}
+                  employeeName={
+                    dailyTask.assignment.assigned_to === user.id
+                      ? fullName || undefined
+                      : employeeNames[dailyTask.assignment.assigned_to] || undefined
+                  }
                 />
               ))}
             </div>
@@ -408,6 +464,7 @@ interface TaskItemProps {
   dailyTask: {
     assignment: {
       id: string;
+      assigned_to: string;
       assigner?: {
         id: string;
         full_name: string | null;
@@ -421,23 +478,37 @@ interface TaskItemProps {
     };
     status: TaskStatus;
     completion?: {
+      id: string;
       quantity_completed: number | null;
+      notes: string | null;
+      status: TaskStatus;
+      completion_date: string;
+      scheduled_date: string;
+      approval_status: string;
+      manager_comment?: string | null;
     };
   };
   onStatusChange: (assignmentId: string, status: TaskStatus, quantity?: number, notes?: string) => void;
   onIndividualUpdate: (assignmentId: string, status: TaskStatus, quantity?: number, notes?: string) => void;
   isModified: boolean;
   currentUserId: string;
+  isManager: boolean;
   dependencies: Array<{ id: string; name: string }>;
+  employeeName?: string;
 }
 
-const TaskItem = ({ dailyTask, onStatusChange, onIndividualUpdate, isModified, currentUserId, dependencies }: TaskItemProps) => {
+const TaskItem = ({ dailyTask, onStatusChange, onIndividualUpdate, isModified, currentUserId, isManager, dependencies, employeeName }: TaskItemProps) => {
   const { task } = dailyTask.assignment;
   const status = dailyTask.status;
   const [quantity, setQuantity] = useState<string>("");
   const [completionStatus, setCompletionStatus] = useState<string>("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  const [isApproving, setIsApproving] = useState(false);
+  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
+  
+  // Check if manager is viewing a subordinate's task (cannot edit, only approve/reject)
+  const isSubordinateTask = isManager && dailyTask.assignment.assigned_to !== currentUserId;
 
   const hasBenchmark = task.benchmark !== null && task.benchmark > 1;
   const quantityNum = quantity ? parseFloat(quantity) : 0;
@@ -527,7 +598,7 @@ const TaskItem = ({ dailyTask, onStatusChange, onIndividualUpdate, isModified, c
     }
   };
 
-  const canTakeAction = status === "scheduled" || status === "pending";
+  const canTakeAction = (status === "scheduled" || status === "pending") && !isSubordinateTask;
 
   // Track changes as user types (debounced)
   useEffect(() => {
@@ -580,6 +651,60 @@ const TaskItem = ({ dailyTask, onStatusChange, onIndividualUpdate, isModified, c
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       handleSubmit();
+    }
+  };
+
+  const handleApprove = async (comment?: string) => {
+    if (!dailyTask.completion || !isManager) return;
+
+    setIsApproving(true);
+    try {
+      const { error } = await supabase
+        .from("task_completions")
+        .update({
+          approval_status: "approved",
+          approved_by: currentUserId,
+          manager_comment: comment || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", dailyTask.completion.id);
+
+      if (error) throw error;
+
+      // Refresh the tasks to show updated approval status
+      window.location.reload(); // Simple refresh for now, could be optimized later
+    } catch (error: any) {
+      console.error("Error approving task:", error);
+      throw error;
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  const handleReject = async (comment: string) => {
+    if (!dailyTask.completion || !isManager) return;
+
+    setIsApproving(true);
+    try {
+      const { error } = await supabase
+        .from("task_completions")
+        .update({
+          approval_status: "rejected",
+          approved_by: currentUserId,
+          manager_comment: comment,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", dailyTask.completion.id);
+
+      if (error) throw error;
+
+      // Refresh the tasks to show updated approval status
+      window.location.reload(); // Simple refresh for now, could be optimized later
+    } catch (error: any) {
+      console.error("Error rejecting task:", error);
+      throw error;
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -724,6 +849,78 @@ const TaskItem = ({ dailyTask, onStatusChange, onIndividualUpdate, isModified, c
       ) : (
         <div className="flex items-center gap-3">
           {getStatusBadge()}
+          {dailyTask.completion && (
+            <>
+              <TaskApprovalBadge
+                approvalStatus={dailyTask.completion.approval_status as "pending" | "approved" | "rejected" | null}
+              />
+              {isSubordinateTask && dailyTask.completion.approval_status === 'pending' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-3 text-xs"
+                  onClick={() => setApprovalDialogOpen(true)}
+                  disabled={isApproving}
+                >
+                  {isApproving ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-3 h-3 mr-1" />
+                      Review & Approve
+                    </>
+                  )}
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+      
+      {/* Approval Dialog for Managers */}
+      {dailyTask.completion && (
+        <TaskApprovalDialog
+          open={approvalDialogOpen}
+          onOpenChange={setApprovalDialogOpen}
+          taskName={task.name}
+          employeeName={employeeName || "Employee"}
+          completionDate={format(new Date(dailyTask.completion.completion_date), "MMM dd, yyyy")}
+          scheduledDate={format(new Date(dailyTask.completion.scheduled_date), "MMM dd, yyyy")}
+          status={dailyTask.completion.status}
+          quantity={dailyTask.completion.quantity_completed}
+          employeeNotes={dailyTask.completion.notes}
+          currentApprovalStatus={dailyTask.completion.approval_status as "pending" | "approved" | "rejected"}
+          onApprove={handleApprove}
+          onReject={handleReject}
+        />
+      )}
+      
+      {/* Read-only view for managers viewing subordinate tasks */}
+      {isSubordinateTask && dailyTask.completion && (
+        <div className="mt-3 p-3 bg-muted/50 rounded-lg space-y-2 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Quantity:</span>
+            <span className="font-medium">{dailyTask.completion.quantity_completed ?? "N/A"}</span>
+          </div>
+          {dailyTask.completion.notes && (
+            <div>
+              <span className="text-muted-foreground">Employee Notes:</span>
+              <p className="mt-1 text-sm whitespace-pre-wrap bg-background p-2 rounded border">
+                {dailyTask.completion.notes}
+              </p>
+            </div>
+          )}
+          {dailyTask.completion.manager_comment && (
+            <div>
+              <span className="text-muted-foreground">Manager Comment:</span>
+              <p className="mt-1 text-sm whitespace-pre-wrap bg-background p-2 rounded border">
+                {dailyTask.completion.manager_comment}
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
