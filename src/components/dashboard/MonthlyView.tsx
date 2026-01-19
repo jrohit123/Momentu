@@ -39,6 +39,8 @@ import { TaskApprovalDialog } from "@/components/tasks/TaskApprovalDialog";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useSystemSettings } from "@/hooks/useSystemSettings";
+import { formatDateForDB } from "@/lib/dateUtils";
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
 
@@ -48,6 +50,7 @@ interface MonthlyViewProps {
 
 const MonthlyView = ({ user }: MonthlyViewProps) => {
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
   const { subordinates, loading: subordinatesLoading } = useSubordinates(user.id);
   const [selectedSubordinateId, setSelectedSubordinateId] = useState<string>("self");
   const targetUserId = selectedSubordinateId === "self" ? undefined : selectedSubordinateId;
@@ -57,6 +60,26 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
   const { teamStats } = useTeamCompletionStats(user.id, currentDate);
   const { toast } = useToast();
   const { isManager } = useUserRole(user.id);
+  const { settings } = useSystemSettings(organizationId);
+
+  useEffect(() => {
+    const fetchOrganizationId = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("users")
+          .select("organization_id")
+          .eq("id", user.id)
+          .single();
+
+        if (error) throw error;
+        setOrganizationId(data?.organization_id || null);
+      } catch (error) {
+        console.error("Error fetching organization ID:", error);
+      }
+    };
+
+    fetchOrganizationId();
+  }, [user.id]);
   
   // State for task completion dialog
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -115,8 +138,8 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     notes?: string
   ) => {
     try {
-      const scheduledDateStr = format(scheduledDate, "yyyy-MM-dd");
-      const completionDateStr = format(new Date(), "yyyy-MM-dd"); // Always use today as completion date
+      const scheduledDateStr = formatDateForDB(scheduledDate, settings.timezone);
+      const completionDateStr = formatDateForDB(new Date(), settings.timezone); // Always use today as completion date
       
       // Check if completion already exists for this scheduled date
       const { data: existing } = await supabase
@@ -370,7 +393,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     const dayStats = new Map<string, { completed: number; scheduled: number; percentage: number }>();
     
     daysInMonth.forEach((day) => {
-      const dateStr = format(day, "yyyy-MM-dd");
+      const dateStr = formatDateForDB(day, settings.timezone);
       let completed = 0;
       let scheduled = 0;
       
@@ -399,7 +422,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     });
     
     return dayStats;
-  }, [filteredTasks, daysInMonth]);
+  }, [filteredTasks, daysInMonth, settings.timezone]);
 
   // Calculate month-wise completion percentage and detailed breakdown
   const { monthWiseCompletion, breakdown } = useMemo(() => {
@@ -415,7 +438,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     
     // Calculate across all days in the month
     daysInMonth.forEach((day) => {
-      const dateStr = format(day, "yyyy-MM-dd");
+      const dateStr = formatDateForDB(day, settings.timezone);
       
       filteredTasks.forEach((taskData) => {
         const status = taskData.dailyStatuses.get(dateStr);
@@ -468,7 +491,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
         scheduledCount,
       },
     };
-  }, [filteredTasks, daysInMonth]);
+  }, [filteredTasks, daysInMonth, settings.timezone]);
 
   const previousMonth = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
@@ -868,7 +891,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
                           {task.benchmark || "-"}
                         </td>
                         {daysInMonth.map((day) => {
-                          const dateStr = format(day, "yyyy-MM-dd");
+                          const dateStr = formatDateForDB(day, settings.timezone);
                           const status = taskData.dailyStatuses.get(dateStr) || "not_applicable";
                           const notes = taskData.dailyNotes.get(dateStr) || null;
                           const quantity = taskData.dailyQuantities.get(dateStr) || null;
@@ -1005,7 +1028,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
                     <td className="px-1 py-1.5 text-center text-xs sm:text-sm">-</td>
                     <td className="px-1 py-1.5 text-center text-xs sm:text-sm">-</td>
                     {daysInMonth.map((day) => {
-                      const dateStr = format(day, "yyyy-MM-dd");
+                      const dateStr = formatDateForDB(day, settings.timezone);
                       const dayStat = dayWiseCompletion.get(dateStr);
                       const percentage = dayStat?.percentage || 0;
                       const workingDayInfo = isWorkingDay(day);

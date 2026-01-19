@@ -5,6 +5,7 @@ import { format, startOfDay, subDays, isBefore } from "date-fns";
 import { useTaskRecurrence } from "./useTaskRecurrence";
 import { useWorkingDays } from "./useWorkingDays";
 import { useSystemSettings } from "./useSystemSettings";
+import { formatDateForDB } from "@/lib/dateUtils";
 import type { Database } from "@/integrations/supabase/types";
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
@@ -85,7 +86,7 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
   const fetchDailyTasks = async () => {
     try {
       setLoading(true);
-      const dateStr = format(targetDate, "yyyy-MM-dd");
+      const dateStr = formatDateForDB(targetDate, settings.timezone);
       const workingDayInfo = isWorkingDay(targetDate);
 
       // Fetch user's task assignments with task details and assigner info
@@ -126,7 +127,7 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
       // Need to check both scheduled_date (when task was due) and completion_date (when it was done)
       // Also fetch completions that were completed today but scheduled for previous days (delayed tasks)
       // And fetch completions from past days to check if they're truly pending
-      const pastDateStr = format(subDays(targetDate, 30), "yyyy-MM-dd");
+      const pastDateStr = formatDateForDB(subDays(targetDate, 30), settings.timezone);
       const { data: completions, error: compError } = await supabase
         .from("task_completions")
         .select("*")
@@ -270,7 +271,7 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
           const checkDateInfo = isWorkingDay(checkDate);
           
           if (checkDateInfo.isWorkingDay && taskAppliesToDate(task, checkDate)) {
-            const checkDateStr = format(checkDate, "yyyy-MM-dd");
+            const checkDateStr = formatDateForDB(checkDate, settings.timezone);
             const scheduledKey = `${assignment.id}-${checkDateStr}`;
             const completion = completionMapByScheduled.get(scheduledKey)?.[0];
 
@@ -333,7 +334,7 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
   ) => {
     try {
       // Check dependencies before allowing completion
-      const scheduledDate = originalDate || format(targetDate, "yyyy-MM-dd");
+      const scheduledDate = originalDate || formatDateForDB(targetDate, settings.timezone);
       
       // Get the task ID from the assignment
       const { data: assignment, error: assignError } = await supabase
@@ -402,7 +403,7 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
       }
 
       // completionDate is when it's actually being completed (today)
-      const completionDate = format(targetDate, "yyyy-MM-dd");
+      const completionDate = formatDateForDB(targetDate, settings.timezone);
 
       // Check if completion already exists for this scheduled date
       const { data: existing } = await supabase

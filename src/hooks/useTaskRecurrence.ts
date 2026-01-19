@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { RRule, Frequency } from "rrule";
 import { startOfDay, endOfDay, isSameDay } from "date-fns";
+import { formatInTimeZone } from "date-fns-tz";
 
 interface RecurrenceConfig {
   frequency?: string;
@@ -80,15 +81,20 @@ export const useTaskRecurrence = () => {
       const config = task.recurrence_config || { interval: 1 };
 
       try {
-        // Create dtstart in UTC to avoid timezone issues
-        // Parse the created_at date and create a UTC date at midnight
+        // Create dtstart using IST timezone (default organization timezone)
+        // Parse the created_at date and extract date components in IST
+        // This ensures tasks start on the correct local date, not UTC date
         const createdDate = new Date(task.created_at);
-        const dtstart = new Date(Date.UTC(
-          createdDate.getUTCFullYear(),
-          createdDate.getUTCMonth(),
-          createdDate.getUTCDate(),
-          0, 0, 0, 0
-        ));
+        const istTimezone = "Asia/Kolkata";
+        
+        // Extract date components in IST timezone
+        const istDateStr = formatInTimeZone(createdDate, istTimezone, "yyyy-MM-dd");
+        
+        // Create a date representing midnight IST on the creation date
+        // Use toDate to convert the IST date string to a Date object
+        // Format: "yyyy-MM-ddTHH:mm:ss" where the time represents IST
+        const istMidnightStr = `${istDateStr}T00:00:00+05:30`; // IST is UTC+5:30
+        const dtstart = new Date(istMidnightStr);
         
         // Build RRule options
         const options: any = {
@@ -178,29 +184,23 @@ export const useTaskRecurrence = () => {
         const rule = new RRule(options);
         
         // Check if target date matches any occurrence
-        // Normalize target date to UTC to match RRule's output
-        const targetDateUTC = new Date(Date.UTC(
-          targetDate.getFullYear(),
-          targetDate.getMonth(),
-          targetDate.getDate(),
-          0, 0, 0, 0
-        ));
-        const targetStart = targetDateUTC;
-        const targetEnd = new Date(targetDateUTC);
-        targetEnd.setUTCHours(23, 59, 59, 999);
+        // Normalize target date to IST first, then convert to UTC for RRule
+        const targetDateISTStr = formatInTimeZone(targetDate, istTimezone, "yyyy-MM-dd");
+        
+        // Create UTC dates for RRule.between() using IST date components
+        // Use ISO 8601 format with timezone offset (IST is UTC+5:30)
+        const targetStartIST = `${targetDateISTStr}T00:00:00+05:30`;
+        const targetStart = new Date(targetStartIST);
+        const targetEndIST = `${targetDateISTStr}T23:59:59+05:30`;
+        const targetEnd = new Date(targetEndIST);
         
         const occurrences = rule.between(targetStart, targetEnd, true);
         
-        // Check if any occurrence falls on the target date (compare by UTC date components)
-        const targetYear = targetDate.getFullYear();
-        const targetMonth = targetDate.getMonth();
-        const targetDay = targetDate.getDate();
-        
+        // Check if any occurrence falls on the target date (compare by IST date components)
         return occurrences.some(occurrence => {
           const occDate = new Date(occurrence);
-          return occDate.getUTCFullYear() === targetYear &&
-                 occDate.getUTCMonth() === targetMonth &&
-                 occDate.getUTCDate() === targetDay;
+          const occDateISTStr = formatInTimeZone(occDate, istTimezone, "yyyy-MM-dd");
+          return occDateISTStr === targetDateISTStr;
         });
       } catch (error) {
         console.error("Error processing recurrence:", error);

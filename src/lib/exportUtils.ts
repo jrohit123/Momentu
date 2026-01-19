@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import { format } from "date-fns";
+import { formatDateForDB } from "./dateUtils";
 import type { Database } from "@/integrations/supabase/types";
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
@@ -103,7 +104,7 @@ export const exportMonthlyToExcel = async (
     const notesRowData: any[] = ["-", "Comments for above task", "", ""];
 
     daysInMonth.forEach((day) => {
-      const dateStr = format(day, "yyyy-MM-dd");
+      const dateStr = formatDateForDB(day); // Uses default IST timezone
       const status = taskData.dailyStatuses.get(dateStr) || "not_applicable";
       const workingDayInfo = isWorkingDay(day);
       const notes = taskData.dailyNotes.get(dateStr);
@@ -219,7 +220,7 @@ export const exportMonthlyToCSV = (
     const notesRow = ['"-"', '"Comments for above task"', '""', '""']; // "Notes" label in second column, empty for other task info columns
 
     daysInMonth.forEach((day) => {
-      const dateStr = format(day, "yyyy-MM-dd");
+      const dateStr = formatDateForDB(day); // Uses default IST timezone
       const status = taskData.dailyStatuses.get(dateStr) || "not_applicable";
       const workingDayInfo = isWorkingDay(day);
       const notes = taskData.dailyNotes.get(dateStr);

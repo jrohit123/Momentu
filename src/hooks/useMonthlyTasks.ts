@@ -4,6 +4,8 @@ import { useToast } from "@/hooks/use-toast";
 import { format, eachDayOfInterval, startOfMonth, endOfMonth } from "date-fns";
 import { useTaskRecurrence } from "./useTaskRecurrence";
 import { useWorkingDays } from "./useWorkingDays";
+import { useSystemSettings } from "./useSystemSettings";
+import { formatDateForDB } from "@/lib/dateUtils";
 import type { Database } from "@/integrations/supabase/types";
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
@@ -49,15 +51,39 @@ interface MonthlyTaskData {
 export const useMonthlyTasks = (userId: string, currentMonth: Date, targetUserId?: string) => {
   const [tasks, setTasks] = useState<MonthlyTaskData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
   const { toast } = useToast();
   const { taskAppliesToDate } = useTaskRecurrence();
   // Use targetUserId if provided, otherwise use userId
   const effectiveUserId = targetUserId || userId;
   const { isWorkingDay } = useWorkingDays(effectiveUserId);
+  const { settings } = useSystemSettings(organizationId);
 
   useEffect(() => {
-    fetchMonthlyTasks();
-  }, [userId, currentMonth, targetUserId]);
+    const fetchOrganizationId = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("users")
+          .select("organization_id")
+          .eq("id", userId)
+          .single();
+
+        if (error) throw error;
+        setOrganizationId(data?.organization_id || null);
+      } catch (error) {
+        console.error("Error fetching organization ID:", error);
+      }
+    };
+
+    fetchOrganizationId();
+  }, [userId]);
+
+  useEffect(() => {
+    if (organizationId) {
+      fetchMonthlyTasks();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, currentMonth, targetUserId, organizationId]);
 
   const fetchMonthlyTasks = async () => {
     try {
@@ -168,8 +194,8 @@ export const useMonthlyTasks = (userId: string, currentMonth: Date, targetUserId
 
       // Fetch all completions for the month
       // Need to check both scheduled_date (when tasks were due) and completion_date (when they were done)
-      const monthStartStr = format(monthStart, "yyyy-MM-dd");
-      const monthEndStr = format(monthEnd, "yyyy-MM-dd");
+      const monthStartStr = formatDateForDB(monthStart, settings.timezone);
+      const monthEndStr = formatDateForDB(monthEnd, settings.timezone);
 
       // Fetch all completions for these assignments, then filter in code
       const { data: allCompletions, error: compError } = await supabase
@@ -222,7 +248,7 @@ export const useMonthlyTasks = (userId: string, currentMonth: Date, targetUserId
         const dailyManagerComments = new Map<string, string | null>();
 
         for (const day of daysInMonth) {
-          const dateStr = format(day, "yyyy-MM-dd");
+          const dateStr = formatDateForDB(day, settings.timezone);
           const workingDayInfo = isWorkingDay(day);
 
           // Check if task applies to this date
@@ -308,11 +334,13 @@ export const useMonthlyTasks = (userId: string, currentMonth: Date, targetUserId
 
       setTasks(monthlyData);
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
+      if (error.message !== "Cannot read properties of undefined (reading 'timezone')") {
+        toast({
+          title: "Error",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { format, isWithinInterval, parseISO } from "date-fns";
+import { useSystemSettings } from "./useSystemSettings";
+import { formatDateForDB } from "@/lib/dateUtils";
 
 interface WorkingDayInfo {
   isWorkingDay: boolean;
@@ -17,6 +19,27 @@ export const useWorkingDays = (userId: string) => {
   const [publicHolidays, setPublicHolidays] = useState<Set<string>>(new Set());
   const [personalHolidays, setPersonalHolidays] = useState<Array<{ start: string; end: string }>>([]);
   const [loading, setLoading] = useState(true);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const { settings } = useSystemSettings(organizationId);
+
+  useEffect(() => {
+    const fetchOrganizationId = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("users")
+          .select("organization_id")
+          .eq("id", userId)
+          .single();
+
+        if (error) throw error;
+        setOrganizationId(data?.organization_id || null);
+      } catch (error) {
+        console.error("Error fetching organization ID:", error);
+      }
+    };
+
+    fetchOrganizationId();
+  }, [userId]);
 
   useEffect(() => {
     const fetchWorkingDayData = async () => {
@@ -70,8 +93,11 @@ export const useWorkingDays = (userId: string) => {
       }
     };
 
-    fetchWorkingDayData();
-  }, [userId]);
+    if (organizationId) {
+      fetchWorkingDayData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, organizationId]);
 
   const isWorkingDay = (date: Date): WorkingDayInfo => {
     if (loading) {
@@ -85,7 +111,7 @@ export const useWorkingDays = (userId: string) => {
     }
 
     // Check public holiday
-    const dateStr = format(date, "yyyy-MM-dd");
+    const dateStr = formatDateForDB(date, settings.timezone);
     if (publicHolidays.has(dateStr)) {
       return { isWorkingDay: false, reason: "Public Holiday", loading: false };
     }

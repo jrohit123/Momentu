@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { format, startOfMonth, endOfMonth } from "date-fns";
+import { useSystemSettings } from "./useSystemSettings";
+import { formatDateForDB } from "@/lib/dateUtils";
 
 interface TeamMemberStats {
   userId: string;
@@ -15,11 +17,35 @@ interface TeamMemberStats {
 export const useTeamCompletionStats = (userId: string, currentMonth: Date) => {
   const [teamStats, setTeamStats] = useState<TeamMemberStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
   const { toast } = useToast();
+  const { settings } = useSystemSettings(organizationId);
 
   useEffect(() => {
-    fetchTeamStats();
-  }, [userId, currentMonth]);
+    const fetchOrganizationId = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("users")
+          .select("organization_id")
+          .eq("id", userId)
+          .single();
+
+        if (error) throw error;
+        setOrganizationId(data?.organization_id || null);
+      } catch (error) {
+        console.error("Error fetching organization ID:", error);
+      }
+    };
+
+    fetchOrganizationId();
+  }, [userId]);
+
+  useEffect(() => {
+    if (organizationId) {
+      fetchTeamStats();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, currentMonth, organizationId]);
 
   const fetchTeamStats = async () => {
     try {
@@ -42,8 +68,8 @@ export const useTeamCompletionStats = (userId: string, currentMonth: Date) => {
 
       const monthStart = startOfMonth(currentMonth);
       const monthEnd = endOfMonth(currentMonth);
-      const monthStartStr = format(monthStart, "yyyy-MM-dd");
-      const monthEndStr = format(monthEnd, "yyyy-MM-dd");
+      const monthStartStr = formatDateForDB(monthStart, settings.timezone);
+      const monthEndStr = formatDateForDB(monthEnd, settings.timezone);
 
       // Fetch stats for each subordinate
       const statsPromises = subordinates.map(async (subordinate) => {
