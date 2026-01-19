@@ -48,87 +48,42 @@ export const TaskApprovalDialog = ({
 
   // Reset form when dialog opens
   useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:50',message:'Dialog useEffect triggered',data:{open,isSubmitting,onApproveType:typeof onApprove,onRejectType:typeof onReject},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-    // #endregion
     if (open) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:53',message:'Dialog opened - resetting form',data:{open},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-      // #endregion
       setComment("");
       setError("");
     }
   }, [open]);
 
   const handleApprove = async () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:57',message:'handleApprove called',data:{isSubmitting,comment:comment.trim()||undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     setError("");
     setIsSubmitting(true);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:60',message:'isSubmitting set to true',data:{isSubmitting:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:62',message:'calling onApprove',data:{comment:comment.trim()||undefined,onApproveType:typeof onApprove},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       await onApprove(comment.trim() || undefined);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:64',message:'onApprove completed successfully',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       // Dialog closing is handled by parent component after onApprove completes
     } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:68',message:'handleApprove error caught',data:{errorMessage:error?.message,errorType:error?.constructor?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
       setError(error.message || "Failed to approve task");
     } finally {
       setIsSubmitting(false);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:71',message:'isSubmitting set to false',data:{isSubmitting:false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
     }
   };
 
   const handleReject = async () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:70',message:'handleReject called',data:{isSubmitting,comment:comment.trim()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     setError("");
     
     // Validate that comment is provided for rejection
     if (!comment.trim()) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:75',message:'handleReject validation failed - no comment',data:{comment:comment.trim()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       setError("Comments are required when rejecting a task");
       return;
     }
 
     setIsSubmitting(true);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:80',message:'isSubmitting set to true',data:{isSubmitting:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:82',message:'calling onReject',data:{comment:comment.trim(),onRejectType:typeof onReject},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       await onReject(comment.trim());
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:84',message:'onReject completed successfully',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       // Dialog closing is handled by parent component after onReject completes
     } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:88',message:'handleReject error caught',data:{errorMessage:error?.message,errorType:error?.constructor?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
       setError(error.message || "Failed to reject task");
     } finally {
       setIsSubmitting(false);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:91',message:'isSubmitting set to false',data:{isSubmitting:false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
     }
   };
 
@@ -260,9 +215,6 @@ export const TaskApprovalDialog = ({
           <Button
             variant="destructive"
             onClick={() => {
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:217',message:'Reject button clicked',data:{isSubmitting,disabled:isSubmitting},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-              // #endregion
               handleReject();
             }}
             disabled={isSubmitting}
@@ -273,9 +225,6 @@ export const TaskApprovalDialog = ({
           </Button>
           <Button
             onClick={() => {
-              // #region agent log
-              fetch('http://127.0.0.1:7242/ingest/bbb89629-71d7-4d61-a454-300bbc1f308f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TaskApprovalDialog.tsx:225',message:'Approve button clicked',data:{isSubmitting,disabled:isSubmitting},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-              // #endregion
               handleApprove();
             }}
             disabled={isSubmitting}

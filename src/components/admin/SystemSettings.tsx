@@ -363,6 +363,22 @@ export const SystemSettings = ({ user }: SystemSettingsProps) => {
             />
           </div>
 
+          {/* Auto-Approve Tasks Setting */}
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="auto-approve-tasks">Auto-Approve Tasks</Label>
+              <p className="text-xs text-muted-foreground">
+                When enabled, task completions are automatically approved. When disabled, managers must approve each completion.
+              </p>
+            </div>
+            <Switch
+              id="auto-approve-tasks"
+              checked={getSettingBoolean("auto_approve_tasks")}
+              onCheckedChange={(checked) => handleSettingChange("auto_approve_tasks", checked)}
+              disabled={saving}
+            />
+          </div>
+
           {/* Save Button */}
           <div className="flex justify-end pt-4 border-t">
             <Button 

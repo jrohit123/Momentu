@@ -67,7 +67,7 @@ export const useTeamCompletionStats = (userId: string, currentMonth: Date) => {
         // Get completions for this month
         const { data: completions } = await supabase
           .from("task_completions")
-          .select("status, scheduled_date, completion_date")
+          .select("status, scheduled_date, completion_date, approval_status")
           .in(
             "assignment_id",
             assignments.map((a) => a.id)
@@ -84,7 +84,7 @@ export const useTeamCompletionStats = (userId: string, currentMonth: Date) => {
           if (scheduledDate >= monthStartStr && scheduledDate <= monthEndStr) {
             const taskKey = `${c.assignment_id}-${scheduledDate}`;
             uniqueTasks.add(taskKey);
-            if (c.status === "completed") {
+            if (c.status === "completed" && c.approval_status === "approved") {
               completedCount++;
             }
           }

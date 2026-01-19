@@ -5,6 +5,7 @@ interface SystemSettings {
   timezone: string;
   date_format: string;
   allow_upward_delegation: boolean;
+  auto_approve_tasks: boolean;
   email_notification_time?: string; // Format: "HH:mm" (24-hour format, e.g., "18:00" for 6 PM)
   email_notification_day?: string; // "same" or "previous" - whether to send for same day or previous day
 }
@@ -14,6 +15,7 @@ export const useSystemSettings = (organizationId: string | null) => {
     timezone: "Asia/Kolkata",
     date_format: "YYYY-MM-DD",
     allow_upward_delegation: false,
+    auto_approve_tasks: true, // Default to auto-approve for backward compatibility
     email_notification_time: "18:00", // Default 6 PM
     email_notification_day: "same", // Default same day
   });

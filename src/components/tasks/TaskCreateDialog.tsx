@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Calendar, Edit, User, Users, AlertCircle, Link2 } from "lucide-react";
+import { Loader2, Calendar, Edit, User, AlertCircle, Link2, Check, Search, X } from "lucide-react";
 import { RecurrenceConfig } from "./RecurrenceConfig";
 import { useOrganizationMembers } from "@/hooks/useOrganizationMembers";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
@@ -21,7 +21,6 @@ import { DelegationTypeBadge } from "./DelegationTypeBadge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Check, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const taskSchema = z.object({

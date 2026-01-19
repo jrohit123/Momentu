@@ -4,6 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { format, startOfDay, subDays, isBefore } from "date-fns";
 import { useTaskRecurrence } from "./useTaskRecurrence";
 import { useWorkingDays } from "./useWorkingDays";
+import { useSystemSettings } from "./useSystemSettings";
 import type { Database } from "@/integrations/supabase/types";
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
@@ -39,6 +40,8 @@ interface TaskCompletion {
   status: TaskStatus;
   quantity_completed: number | null;
   notes: string | null;
+  approval_status: string;
+  approved_by: string | null;
 }
 
 interface DailyTask {
@@ -52,11 +55,29 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
   const [tasks, setTasks] = useState<DailyTask[]>([]);
   const [pendingTasks, setPendingTasks] = useState<DailyTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
   const { toast } = useToast();
   const { taskAppliesToDate } = useTaskRecurrence();
   const { isWorkingDay, getNextWorkingDay } = useWorkingDays(userId);
+  const { settings } = useSystemSettings(organizationId);
 
   useEffect(() => {
+    const fetchOrganizationId = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("users")
+          .select("organization_id")
+          .eq("id", userId)
+          .single();
+
+        if (error) throw error;
+        setOrganizationId(data?.organization_id || null);
+      } catch (error) {
+        console.error("Error fetching organization ID:", error);
+      }
+    };
+
+    fetchOrganizationId();
     fetchDailyTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, targetDate]);
@@ -392,7 +413,17 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
         .maybeSingle();
 
       if (existing) {
-        // Update existing
+        // Update existing - check approval settings
+        const approvalData = settings.auto_approve_tasks
+          ? {
+              approval_status: "approved" as const,
+              approved_by: userId,
+            }
+          : {
+              approval_status: "pending" as const,
+              approved_by: null,
+            };
+
         const { error } = await supabase
           .from("task_completions")
           .update({
@@ -400,13 +431,24 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
             status,
             quantity_completed: quantityCompleted,
             notes,
+            ...approvalData,
             updated_at: new Date().toISOString(),
           })
           .eq("id", existing.id);
 
         if (error) throw error;
       } else {
-        // Create new
+        // Create new - check approval settings
+        const approvalData = settings.auto_approve_tasks
+          ? {
+              approval_status: "approved" as const,
+              approved_by: userId,
+            }
+          : {
+              approval_status: "pending" as const,
+              approved_by: null,
+            };
+
         const { error } = await supabase
           .from("task_completions")
           .insert({
@@ -416,6 +458,7 @@ export const useDailyTasks = (userId: string, targetDate: Date) => {
             status,
             quantity_completed: quantityCompleted,
             notes,
+            ...approvalData,
           });
 
         if (error) throw error;
