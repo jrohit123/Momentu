@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Briefcase, Plus, Clock, CheckCircle2, XCircle } from "lucide-react";
 import { format, parseISO, differenceInDays } from "date-fns";
 
@@ -113,6 +113,7 @@ export const PersonalHolidaysList = ({
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Request Leave</DialogTitle>
+              <DialogDescription>Submit a leave request for the selected dates.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="grid grid-cols-2 gap-4">

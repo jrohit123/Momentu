@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Calendar, Plus, Trash2, RefreshCw } from "lucide-react";
 import { format, parseISO } from "date-fns";
 
@@ -93,6 +93,7 @@ export const PublicHolidaysList = ({
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Add Public Holiday</DialogTitle>
+                <DialogDescription>Add a new public holiday for your organization.</DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">

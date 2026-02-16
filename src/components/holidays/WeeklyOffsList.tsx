@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Sun, Plus, Trash2 } from "lucide-react";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -98,6 +98,7 @@ export const WeeklyOffsList = ({
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Add Weekly Off</DialogTitle>
+                <DialogDescription>Select a day of the week as non-working.</DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="space-y-2">

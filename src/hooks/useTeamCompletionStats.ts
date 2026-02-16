@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { format, startOfMonth, endOfMonth } from "date-fns";
+import { startOfMonth, endOfMonth } from "date-fns";
 import { useSystemSettings } from "./useSystemSettings";
 import { formatDateForDB } from "@/lib/dateUtils";
+import { fetchLeaveDatesForUser } from "@/lib/leaveUtils";
 
 interface TeamMemberStats {
   userId: string;
@@ -28,7 +29,7 @@ export const useTeamCompletionStats = (userId: string, currentMonth: Date) => {
           .from("users")
           .select("organization_id")
           .eq("id", userId)
-          .single();
+          .maybeSingle();
 
         if (error) throw error;
         setOrganizationId(data?.organization_id || null);
@@ -90,6 +91,14 @@ export const useTeamCompletionStats = (userId: string, currentMonth: Date) => {
           };
         }
 
+        // Fetch leave dates for this subordinate - exclude tasks on leave from completion %
+        const leaveDates = await fetchLeaveDatesForUser(
+          subordinate.id,
+          monthStart,
+          monthEnd,
+          settings.timezone
+        );
+
         // Get completions for this month
         const { data: completions } = await supabase
           .from("task_completions")
@@ -101,13 +110,16 @@ export const useTeamCompletionStats = (userId: string, currentMonth: Date) => {
           .or(`scheduled_date.gte.${monthStartStr},completion_date.gte.${monthStartStr}`)
           .or(`scheduled_date.lte.${monthEndStr},completion_date.lte.${monthEndStr}`);
 
-        // Count unique tasks (by scheduled_date)
+        // Count unique tasks (by scheduled_date), excluding tasks on leave days
         const uniqueTasks = new Set<string>();
         let completedCount = 0;
 
         completions?.forEach((c) => {
           const scheduledDate = c.scheduled_date || c.completion_date;
           if (scheduledDate >= monthStartStr && scheduledDate <= monthEndStr) {
+            // Exclude tasks on leave days from completion % (still show as pending elsewhere)
+            if (leaveDates.has(scheduledDate)) return;
+
             const taskKey = `${c.assignment_id}-${scheduledDate}`;
             uniqueTasks.add(taskKey);
             if (c.status === "completed" && c.approval_status === "approved") {

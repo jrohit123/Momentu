@@ -56,7 +56,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
   const targetUserId = selectedSubordinateId === "self" ? undefined : selectedSubordinateId;
   const { tasks, loading, refresh } = useMonthlyTasks(user.id, currentDate, targetUserId);
   const effectiveUserId = targetUserId || user.id;
-  const { isWorkingDay } = useWorkingDays(effectiveUserId);
+  const { isWorkingDay, getLeaveDatesInRange } = useWorkingDays(effectiveUserId);
   const { teamStats } = useTeamCompletionStats(user.id, currentDate);
   const { toast } = useToast();
   const { isManager } = useUserRole(user.id);
@@ -69,7 +69,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
           .from("users")
           .select("organization_id")
           .eq("id", user.id)
-          .single();
+          .maybeSingle();
 
         if (error) throw error;
         setOrganizationId(data?.organization_id || null);
@@ -140,7 +140,11 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     try {
       const scheduledDateStr = formatDateForDB(scheduledDate, settings.timezone);
       const completionDateStr = formatDateForDB(new Date(), settings.timezone); // Always use today as completion date
-      
+
+      const approvalData = settings.auto_approve_tasks
+        ? { approval_status: "approved" as const, approved_by: user.id }
+        : { approval_status: "pending" as const, approved_by: null };
+
       // Check if completion already exists for this scheduled date
       const { data: existing } = await supabase
         .from("task_completions")
@@ -158,6 +162,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
             status,
             quantity_completed: quantityCompleted,
             notes,
+            ...approvalData,
             updated_at: new Date().toISOString(),
           })
           .eq("id", existing.id);
@@ -174,6 +179,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
             status,
             quantity_completed: quantityCompleted,
             notes,
+            ...approvalData,
           });
         
         if (error) throw error;
@@ -208,33 +214,6 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
   const [sortColumn, setSortColumn] = useState<SortColumn>(null); // null means use default sort
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   
-  // Get selected user's completion percentage
-  const selectedUserStats = useMemo(() => {
-    if (selectedSubordinateId === "self") {
-      // Calculate own stats
-      const total = tasks.length;
-      const completed = tasks.reduce((count, taskData) => {
-        let taskCompleted = 0;
-        taskData.dailyStatuses.forEach((status, dateStr) => {
-          const approvalStatus = taskData.dailyApprovalStatuses?.get(dateStr);
-          if (status === "completed" && approvalStatus === "approved") taskCompleted++;
-        });
-        return count + (taskCompleted > 0 ? 1 : 0);
-      }, 0);
-      return {
-        completionPercentage: total > 0 ? Math.round((completed / total) * 100) : 0,
-        fullName: "Your",
-      };
-    } else {
-      const subordinate = subordinates.find((s) => s.id === selectedSubordinateId);
-      const stats = teamStats.find((s) => s.userId === selectedSubordinateId);
-      return {
-        completionPercentage: stats?.completionPercentage || 0,
-        fullName: subordinate?.full_name || "User",
-      };
-    }
-  }, [selectedSubordinateId, subordinates, teamStats, tasks]);
-
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);
   const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
@@ -292,6 +271,16 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
       
       // Skip if task is null (e.g., deleted task with existing assignment)
       if (!task) {
+        return false;
+      }
+
+      // Hide tasks with no relevance to current month (e.g. one-time tasks completed before month start)
+      const hasRelevanceToMonth = daysInMonth.some((day) => {
+        const dateStr = formatDateForDB(day, settings.timezone);
+        const status = taskData.dailyStatuses.get(dateStr);
+        return status && status !== "not_applicable";
+      });
+      if (!hasRelevanceToMonth) {
         return false;
       }
       
@@ -386,14 +375,16 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     }
 
     return filtered;
-  }, [tasks, searchQuery, categoryFilter, statusFilter, approvalFilter, sortColumn, sortDirection]);
+  }, [tasks, searchQuery, categoryFilter, statusFilter, approvalFilter, sortColumn, sortDirection, daysInMonth, settings.timezone]);
 
   // Calculate day-wise completion percentages
   const dayWiseCompletion = useMemo(() => {
     const dayStats = new Map<string, { completed: number; scheduled: number; percentage: number }>();
+    const leaveDateSet = getLeaveDatesInRange(monthStart, monthEnd);
     
     daysInMonth.forEach((day) => {
       const dateStr = formatDateForDB(day, settings.timezone);
+      const isLeaveDay = leaveDateSet.has(dateStr);
       let completed = 0;
       let scheduled = 0;
       
@@ -403,6 +394,9 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
         const task = taskData.assignment.task;
         const benchmark = task?.benchmark || null;
         const approvalStatus = taskData.dailyApprovalStatuses?.get(dateStr);
+
+        // Exclude tasks on leave days from completion % (still show as pending)
+        if (isLeaveDay) return;
 
         // Only count if task is scheduled for this day (not NA) and approved
         if (status && status !== "not_applicable" && approvalStatus === "approved") {
@@ -422,7 +416,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     });
     
     return dayStats;
-  }, [filteredTasks, daysInMonth, settings.timezone]);
+  }, [filteredTasks, daysInMonth, settings.timezone, getLeaveDatesInRange, monthStart, monthEnd]);
 
   // Calculate month-wise completion percentage and detailed breakdown
   const { monthWiseCompletion, breakdown } = useMemo(() => {
@@ -435,10 +429,12 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
     let notDoneCount = 0;
     let pendingCount = 0;
     let scheduledCount = 0;
+    const leaveDateSet = getLeaveDatesInRange(monthStart, monthEnd);
     
     // Calculate across all days in the month
     daysInMonth.forEach((day) => {
       const dateStr = formatDateForDB(day, settings.timezone);
+      const isLeaveDay = leaveDateSet.has(dateStr);
       
       filteredTasks.forEach((taskData) => {
         const status = taskData.dailyStatuses.get(dateStr);
@@ -446,6 +442,9 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
         const task = taskData.assignment.task;
         const benchmark = task?.benchmark || null;
         const approvalStatus = taskData.dailyApprovalStatuses?.get(dateStr);
+
+        // Exclude tasks on leave days from completion % (still show as pending)
+        if (isLeaveDay) return;
 
         // Only count scheduled tasks (not NA) and approved tasks
         if (status && status !== "not_applicable" && approvalStatus === "approved") {
@@ -491,7 +490,24 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
         scheduledCount,
       },
     };
-  }, [filteredTasks, daysInMonth, settings.timezone]);
+  }, [filteredTasks, daysInMonth, settings.timezone, getLeaveDatesInRange, monthStart, monthEnd]);
+
+  // Get selected user's completion percentage (uses monthWiseCompletion for self - excludes leave days)
+  const selectedUserStats = useMemo(() => {
+    if (selectedSubordinateId === "self") {
+      return {
+        completionPercentage: monthWiseCompletion,
+        fullName: "Your",
+      };
+    } else {
+      const subordinate = subordinates.find((s) => s.id === selectedSubordinateId);
+      const stats = teamStats.find((s) => s.userId === selectedSubordinateId);
+      return {
+        completionPercentage: stats?.completionPercentage || 0,
+        fullName: subordinate?.full_name || "User",
+      };
+    }
+  }, [selectedSubordinateId, subordinates, teamStats, monthWiseCompletion]);
 
   const previousMonth = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
@@ -879,7 +895,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
                             className="hover:underline text-left flex items-center gap-1 sm:gap-2 group text-xs sm:text-sm"
                             title="Click to view daily task history"
                           >
-                            <span className="truncate">{task.name}</span>
+                            <span className="break-words whitespace-normal min-w-0">{task.name}</span>
                             <FileText className="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                           </button>
                         </td>
@@ -1116,6 +1132,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
           taskName={selectedTask.taskName}
           benchmark={selectedTask.benchmark}
           description={selectedTask.description}
+          autoApproveTasks={settings.auto_approve_tasks}
           onSubmit={async (status, quantity, notes) => {
             try {
               await handleTaskStatusUpdate(
@@ -1144,6 +1161,7 @@ const MonthlyView = ({ user }: MonthlyViewProps) => {
           taskName={selectedTaskForHistory.taskName}
           taskDescription={selectedTaskForHistory.taskDescription}
           benchmark={selectedTaskForHistory.benchmark}
+          monthStart={formatDateForDB(monthStart, settings.timezone)}
         />
       )}
 

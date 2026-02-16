@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
-interface OrganizationMember {
+export interface OrganizationMember {
   id: string;
   full_name: string;
   email: string;
   department: string | null;
+  manager_id: string | null;
 }
 
 export const useOrganizationMembers = (organizationId: string | null) => {
@@ -26,7 +27,7 @@ export const useOrganizationMembers = (organizationId: string | null) => {
         
         const { data, error } = await supabase
           .from("users")
-          .select("id, full_name, email, department")
+          .select("id, full_name, email, department, manager_id")
           .eq("organization_id", organizationId)
           .eq("is_active", true)
           .order("full_name");

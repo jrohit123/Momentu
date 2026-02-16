@@ -634,7 +634,8 @@ export const TaskCreateDialog = ({ open, onOpenChange, onSuccess, taskToEdit }: 
   if (userLoading && open) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl" aria-describedby={undefined}>
+          <DialogTitle className="sr-only">Loading</DialogTitle>
           <div className="flex items-center justify-center py-8">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           </div>

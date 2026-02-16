@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useOrganizationMembers } from "@/hooks/useOrganizationMembers";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { supabase } from "@/integrations/supabase/client";
@@ -39,7 +40,9 @@ export const BulkAssignDialog = ({
   const [userProfile, setUserProfile] = useState<{ manager_id: string | null; organization_id: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const { members: organizationMembers = [], loading } = useOrganizationMembers(userProfile?.organization_id || null);
+  const [unassignMe, setUnassignMe] = useState(false);
+  const orgId = userProfile?.organization_id || null;
+  const { members: organizationMembers = [], loading } = useOrganizationMembers(orgId);
   const { settings: systemSettings, loading: settingsLoading } = useSystemSettings(userProfile?.organization_id || null);
   const { toast } = useToast();
 
@@ -51,6 +54,7 @@ export const BulkAssignDialog = ({
       setUserProfile(null);
       setSearchQuery("");
       setSearchOpen(false);
+      setUnassignMe(false);
     }
   }, [open, tasks, userId]);
 
@@ -246,10 +250,31 @@ export const BulkAssignDialog = ({
 
       if (insertError) throw insertError;
 
-      toast({
-        title: "Tasks assigned successfully",
-        description: `${assignmentsToCreate.length} assignment(s) created for ${tasks.length} task(s)`,
-      });
+      let unassignSucceeded = true;
+      if (unassignMe && tasks.length > 0) {
+        const { error: unassignError } = await supabase
+          .from("task_assignments")
+          .delete()
+          .in("task_id", tasks.map((t) => t.id))
+          .eq("assigned_to", userId);
+        if (unassignError) {
+          unassignSucceeded = false;
+          toast({
+            title: "Assignments added, unassign failed",
+            description: unassignError.message,
+            variant: "destructive",
+          });
+        }
+      }
+
+      if (unassignSucceeded) {
+        toast({
+          title: "Tasks assigned successfully",
+          description: unassignMe
+            ? `${assignmentsToCreate.length} assignment(s) created and you were removed from ${tasks.length} task(s)`
+            : `${assignmentsToCreate.length} assignment(s) created for ${tasks.length} task(s)`,
+        });
+      }
 
       onOpenChange(false);
       if (onSuccess) onSuccess();
@@ -291,6 +316,23 @@ export const BulkAssignDialog = ({
             </div>
           </div>
 
+          {/* Unassign me option - show when assigning to someone else */}
+          {selectedMembers.some((id) => id !== userId) && (
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="unassign-me-bulk"
+                checked={unassignMe}
+                onCheckedChange={(checked) => setUnassignMe(checked === true)}
+              />
+              <Label
+                htmlFor="unassign-me-bulk"
+                className="text-sm font-normal cursor-pointer"
+              >
+                Also remove myself from these tasks
+              </Label>
+            </div>
+          )}
+
           {/* Assign To Section */}
           {userId && (
             <div className="space-y-3 pt-4 border-t">
@@ -308,7 +350,7 @@ export const BulkAssignDialog = ({
                 </Alert>
               )}
 
-              {(loading || settingsLoading) ? (
+              {(loading || settingsLoading || (open && tasks.length > 0 && !userProfile)) ? (
                 <div className="flex items-center justify-center py-4">
                   <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
                 </div>
@@ -372,7 +414,7 @@ export const BulkAssignDialog = ({
                               {searchableMembers.map((member) => (
                                 <CommandItem
                                   key={member.id}
-                                  value={member.full_name}
+                                  value={`${member.full_name} ${member.email}`}
                                   onSelect={() => handleMemberToggle(member.id)}
                                 >
                                   <Check

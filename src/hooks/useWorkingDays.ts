@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { format, isWithinInterval, parseISO } from "date-fns";
+import { addDays, format, isWithinInterval, parseISO } from "date-fns";
 import { useSystemSettings } from "./useSystemSettings";
 import { formatDateForDB } from "@/lib/dateUtils";
 
@@ -29,7 +29,7 @@ export const useWorkingDays = (userId: string) => {
           .from("users")
           .select("organization_id")
           .eq("id", userId)
-          .single();
+          .maybeSingle();
 
         if (error) throw error;
         setOrganizationId(data?.organization_id || null);
@@ -141,5 +141,37 @@ export const useWorkingDays = (userId: string) => {
     return current;
   };
 
-  return { isWorkingDay, getNextWorkingDay, loading };
+  /**
+   * Returns a Set of date strings (YYYY-MM-DD) when the user is on approved personal leave
+   * within the given range. Used to exclude tasks on leave days from completion % calculations.
+   */
+  const getLeaveDatesInRange = (start: Date, end: Date): Set<string> => {
+    const result = new Set<string>();
+    for (const holiday of personalHolidays) {
+      const hStart = parseISO(holiday.start);
+      const hEnd = parseISO(holiday.end);
+      const overlapStart = start > hStart ? start : hStart;
+      const overlapEnd = end < hEnd ? end : hEnd;
+      if (overlapStart <= overlapEnd) {
+        let d = new Date(overlapStart);
+        while (d <= overlapEnd) {
+          result.add(formatDateForDB(d, settings.timezone));
+          d = addDays(d, 1);
+        }
+      }
+    }
+    return result;
+  };
+
+  /**
+   * Returns true if the date falls within an approved personal leave (holiday).
+   * Used to exclude tasks on leave days from completion % calculations.
+   */
+  const isOnPersonalLeave = (date: Date): boolean => {
+    if (loading) return false;
+    const dateStr = formatDateForDB(date, settings.timezone);
+    return getLeaveDatesInRange(date, date).has(dateStr);
+  };
+
+  return { isWorkingDay, getNextWorkingDay, isOnPersonalLeave, getLeaveDatesInRange, loading };
 };

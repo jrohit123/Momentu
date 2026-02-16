@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { useDailyTasks } from "@/hooks/useDailyTasks";
 import { useWorkingDays } from "@/hooks/useWorkingDays";
 import { useUserRole } from "@/hooks/useUserRole";
+import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { TaskApprovalBadge } from "@/components/tasks/TaskApprovalBadge";
@@ -31,9 +32,11 @@ interface DailyViewProps {
 const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
   const [today] = useState(new Date());
   const [fullName, setFullName] = useState<string | null>(null);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
   const { tasks, pendingTasks, loading, markTaskComplete } = useDailyTasks(user.id, today);
-  const { isWorkingDay } = useWorkingDays(user.id);
+  const { isWorkingDay, isOnPersonalLeave } = useWorkingDays(user.id);
   const { isManager } = useUserRole(user.id);
+  const { settings } = useSystemSettings(organizationId);
   
   // Track modified tasks for bulk update
   const [modifiedTasks, setModifiedTasks] = useState<Map<string, { status: TaskStatus; quantity?: number; notes?: string; originalDate?: string }>>(new Map());
@@ -47,12 +50,15 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
     const fetchUserProfile = async () => {
       const { data } = await supabase
         .from("users")
-        .select("full_name")
+        .select("full_name, organization_id")
         .eq("id", user.id)
         .single();
       
       if (data?.full_name) {
         setFullName(data.full_name);
+      }
+      if (data?.organization_id) {
+        setOrganizationId(data.organization_id);
       }
     };
 
@@ -149,6 +155,10 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
   const stats = useMemo(() => {
     const total = tasks.length;
     const pending = pendingTasks.length;
+
+    // When user is on leave today, exclude all tasks from completion % calculation
+    // (they still show as pending tasks to be completed)
+    const todayIsLeave = isOnPersonalLeave(today);
     
     // Calculate completion using the same formula as MonthlyView:
     // - completed: +1
@@ -158,24 +168,26 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
     // - pending/scheduled: 0
     let totalCompleted = 0;
     let completedCount = 0;
+    const totalForCompletion = todayIsLeave ? 0 : total;
     
-    tasks.forEach((task) => {
-      // Only count tasks that are approved (or don't require approval for auto-approved orgs)
-      const isApproved = task.completion?.approval_status === 'approved';
+    if (!todayIsLeave) {
+      tasks.forEach((task) => {
+        // Only count tasks that are approved (or don't require approval for auto-approved orgs)
+        const isApproved = task.completion?.approval_status === 'approved';
 
-      if (isApproved) {
-        if (task.status === "completed") {
-          totalCompleted += 1;
-          completedCount++;
-        } else if (task.status === "partial") {
-          const quantity = task.completion?.quantity_completed || 0;
-          const benchmark = task.assignment.task.benchmark;
-          if (benchmark !== null && benchmark > 0) {
-            totalCompleted += quantity / benchmark;
-          } else {
-            // If no benchmark, treat partial as 0.5
-            totalCompleted += 0.5;
-          }
+        if (isApproved) {
+          if (task.status === "completed") {
+            totalCompleted += 1;
+            completedCount++;
+          } else if (task.status === "partial") {
+            const quantity = task.completion?.quantity_completed || 0;
+            const benchmark = task.assignment.task.benchmark;
+            if (benchmark !== null && benchmark > 0) {
+              totalCompleted += quantity / benchmark;
+            } else {
+              // If no benchmark, treat partial as 0.5
+              totalCompleted += 0.5;
+            }
         } else if (task.status === "delayed") {
           totalCompleted += 0.5;
         }
@@ -183,11 +195,21 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
       // not_done, pending, scheduled, not_applicable all count as 0
       // Also tasks that are completed but not yet approved count as 0
     });
-    
-    const completion = total > 0 ? Math.round((totalCompleted / total) * 100) : 0;
+    }
 
-    return { total, completed: completedCount, pending, completion };
-  }, [tasks, pendingTasks]);
+    // Completed-late: tasks completed today but which were pending from a previous date (scheduled_date < today)
+    // If Auto-Approve Tasks is true, treat as auto-approved; otherwise require approval_status === "approved"
+    const completedLate = tasks.filter(
+      (t) =>
+        t.originalDate &&
+        (t.completion?.status === "completed" || t.completion?.status === "partial") &&
+        (settings.auto_approve_tasks || t.completion?.approval_status === "approved")
+    ).length;
+    
+    const completion = totalForCompletion > 0 ? Math.round((totalCompleted / totalForCompletion) * 100) : 0;
+
+    return { total, completed: completedCount, pending, completion, completedLate };
+  }, [tasks, pendingTasks, settings.auto_approve_tasks, isOnPersonalLeave, today]);
 
   // Sort tasks by name
   const sortedTasks = useMemo(() => {
@@ -291,7 +313,7 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
       </div>
 
       {/* Stats Overview */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-5 gap-2 sm:gap-4">
         <Card className="bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Total Tasks</CardTitle>
@@ -307,6 +329,15 @@ const DailyView = ({ user, onCreateTask }: DailyViewProps) => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl sm:text-3xl font-bold text-success">{stats.completed}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-orange-500/10 to-orange-500/5 border-orange-500/20">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Completed-late</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl sm:text-3xl font-bold text-orange-600 dark:text-orange-400">{stats.completedLate}</div>
           </CardContent>
         </Card>
 

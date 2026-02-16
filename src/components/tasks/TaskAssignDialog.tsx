@@ -3,7 +3,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useOrganizationMembers } from "@/hooks/useOrganizationMembers";
@@ -44,6 +43,7 @@ export const TaskAssignDialog = ({
   const [userProfile, setUserProfile] = useState<{ manager_id: string | null; organization_id: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [removingAssigneeId, setRemovingAssigneeId] = useState<string | null>(null);
   const { members: organizationMembers = [], loading } = useOrganizationMembers(userProfile?.organization_id || null);
   const { settings: systemSettings, loading: settingsLoading } = useSystemSettings(userProfile?.organization_id || null);
   const { toast } = useToast();
@@ -102,6 +102,54 @@ export const TaskAssignDialog = ({
         ? prev.filter((id) => id !== memberId)
         : [...prev, memberId]
     );
+  };
+
+  const handleRemoveAssignee = async (assigneeId: string) => {
+    if (!task) return;
+    try {
+      setRemovingAssigneeId(assigneeId);
+      const wasLastAssignee = existingAssignees.length === 1;
+
+      const { error: deleteError } = await supabase
+        .from("task_assignments")
+        .delete()
+        .eq("task_id", task.id)
+        .eq("assigned_to", assigneeId);
+
+      if (deleteError) throw deleteError;
+
+      if (wasLastAssignee) {
+        const { error: insertError } = await supabase
+          .from("task_assignments")
+          .insert({
+            task_id: task.id,
+            assigned_to: userId,
+            assigned_by: userId,
+            delegation_type: "self",
+          });
+        if (insertError) throw insertError;
+        toast({
+          title: "Assigned to you",
+          description: "You were the only assignee left, so the task is now assigned to you.",
+        });
+      } else {
+        toast({
+          title: "Removed",
+          description: "Assignee removed from the task.",
+        });
+      }
+
+      await fetchExistingAssignments();
+      onSuccess?.();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setRemovingAssigneeId(null);
+    }
   };
 
   const handleSubmit = async () => {
@@ -453,15 +501,28 @@ export const TaskAssignDialog = ({
                   .filter((m) => existingAssignees.includes(m.id))
                   .map((member) => (
                     <div key={member.id} className="flex items-center gap-1">
-                      <Badge variant="outline" className="text-xs">
+                      <Badge variant="outline" className="text-xs flex items-center gap-1 pr-1">
                         {member.full_name}
+                        {existingAssignments.has(member.id) && (
+                          <DelegationTypeBadge
+                            delegationType={existingAssignments.get(member.id) as any}
+                            showIcon={true}
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAssignee(member.id)}
+                          disabled={removingAssigneeId === member.id}
+                          className="ml-0.5 hover:bg-destructive/20 rounded-full p-0.5 disabled:opacity-50"
+                          title="Remove from task"
+                        >
+                          {removingAssigneeId === member.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <X className="w-3 h-3" />
+                          )}
+                        </button>
                       </Badge>
-                      {existingAssignments.has(member.id) && (
-                        <DelegationTypeBadge
-                          delegationType={existingAssignments.get(member.id) as any}
-                          showIcon={true}
-                        />
-                      )}
                     </div>
                   ))}
               </div>

@@ -16,6 +16,8 @@ interface TaskHistoryDialogProps {
   taskName: string;
   taskDescription: string | null;
   benchmark: number | null;
+  /** When provided (e.g. from MonthlyView), completions before this date are hidden as no longer relevant */
+  monthStart?: string;
 }
 
 interface CompletionRecord {
@@ -36,6 +38,7 @@ export const TaskHistoryDialog = ({
   taskName,
   taskDescription,
   benchmark,
+  monthStart,
 }: TaskHistoryDialogProps) => {
   const [completions, setCompletions] = useState<CompletionRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +48,11 @@ export const TaskHistoryDialog = ({
       fetchTaskHistory();
     }
   }, [open, assignmentId]);
+
+  // Filter out completions done before month start (no longer relevant when viewing that month)
+  const filteredCompletions = monthStart
+    ? completions.filter((c) => c.completion_date >= monthStart)
+    : completions;
 
   const fetchTaskHistory = async () => {
     try {
@@ -114,13 +122,15 @@ export const TaskHistoryDialog = ({
             <FileText className="w-5 h-5" />
             Task History: {taskName}
           </DialogTitle>
-          <DialogDescription>
-            {taskDescription && (
-              <p className="mt-2">{taskDescription}</p>
-            )}
-            {benchmark && (
-              <p className="mt-1 text-sm">Target: {benchmark}</p>
-            )}
+          <DialogDescription asChild>
+            <div className="text-sm text-muted-foreground">
+              {taskDescription && (
+                <p className="mt-2">{taskDescription}</p>
+              )}
+              {benchmark && (
+                <p className="mt-1">Target: {benchmark}</p>
+              )}
+            </div>
           </DialogDescription>
         </DialogHeader>
 
@@ -131,15 +141,19 @@ export const TaskHistoryDialog = ({
                 <Skeleton key={i} className="h-20 w-full" />
               ))}
             </div>
-          ) : completions.length === 0 ? (
+          ) : filteredCompletions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Calendar className="w-12 h-12 mx-auto mb-3 opacity-50" />
               <p>No completion history available</p>
-              <p className="text-sm mt-1">This task hasn't been completed yet</p>
+              <p className="text-sm mt-1">
+                {monthStart && completions.length > 0
+                  ? "No completions in this month"
+                  : "This task hasn't been completed yet"}
+              </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {completions.map((completion, index) => {
+              {filteredCompletions.map((completion) => {
                 const delayed = isDelayed(completion);
                 return (
                   <div

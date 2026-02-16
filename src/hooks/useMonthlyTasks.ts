@@ -66,7 +66,7 @@ export const useMonthlyTasks = (userId: string, currentMonth: Date, targetUserId
           .from("users")
           .select("organization_id")
           .eq("id", userId)
-          .single();
+          .maybeSingle();
 
         if (error) throw error;
         setOrganizationId(data?.organization_id || null);

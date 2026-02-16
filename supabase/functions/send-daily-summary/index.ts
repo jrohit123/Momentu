@@ -345,7 +345,8 @@ const handler = async (req: Request): Promise<Response> => {
 
           // Send email
           console.log(`Preparing to send email to ${user.email}${summary.managerEmail ? ` (CC: ${summary.managerEmail})` : ""}`);
-          const emailHtml = generateEmailHTML(summary, processDateStr, isHoliday);
+          const isPersonalLeave = !!personalHoliday;
+          const emailHtml = generateEmailHTML(summary, processDateStr, isHoliday, isPersonalLeave);
           
           const emailPayload: any = {
             from: "Momentum <onboarding@resend.dev>",
@@ -440,10 +441,12 @@ function formatDate(dateStr: string): string {
   });
 }
 
-function generateEmailHTML(summary: UserSummary, dateStr: string, isHoliday: boolean): string {
+function generateEmailHTML(summary: UserSummary, dateStr: string, isHoliday: boolean, isPersonalLeave = false): string {
   const formattedDate = formatDate(dateStr);
-  const completionRate =
-    summary.totalScheduled > 0
+  // Exclude tasks on leave days from completion % - show N/A when user was on personal leave
+  const completionRate = isPersonalLeave
+    ? null
+    : summary.totalScheduled > 0
       ? Math.round(
           ((summary.totalCompleted + summary.totalPartial * 0.5) / summary.totalScheduled) * 100
         )
@@ -481,8 +484,8 @@ function generateEmailHTML(summary: UserSummary, dateStr: string, isHoliday: boo
                 <div style="font-size: 12px; color: #64748b; text-transform: uppercase;">Scheduled</div>
               </div>
               <div style="text-align: center;">
-                <div style="font-size: 32px; font-weight: bold; color: #10b981;">${completionRate}%</div>
-                <div style="font-size: 12px; color: #64748b; text-transform: uppercase;">Completion</div>
+                <div style="font-size: 32px; font-weight: bold; color: #10b981;">${completionRate !== null ? `${completionRate}%` : "N/A"}</div>
+                <div style="font-size: 12px; color: #64748b; text-transform: uppercase;">Completion${isPersonalLeave ? " (on leave)" : ""}</div>
               </div>
             </div>
             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">

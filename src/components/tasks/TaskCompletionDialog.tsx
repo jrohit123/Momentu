@@ -21,6 +21,7 @@ interface TaskCompletionDialogProps {
   } | null;
   currentUserId?: string;
   onSubmit: (status: TaskStatus, quantity?: number, notes?: string) => void;
+  autoApproveTasks?: boolean;
 }
 
 export const TaskCompletionDialog = ({
@@ -32,6 +33,7 @@ export const TaskCompletionDialog = ({
   assignedBy,
   currentUserId,
   onSubmit,
+  autoApproveTasks = false,
 }: TaskCompletionDialogProps) => {
   const [quantity, setQuantity] = useState<string>("1");
   const [notes, setNotes] = useState("");
@@ -87,7 +89,11 @@ export const TaskCompletionDialog = ({
   const getStatusBadge = () => {
     switch (derivedStatus) {
       case "completed":
-        return <Badge className="bg-success/10 text-success border-success/30">Will mark: Completed</Badge>;
+        return (
+          <Badge className="bg-success/10 text-success border-success/30">
+            Will mark: {autoApproveTasks ? "Final Approved" : "Completed"}
+          </Badge>
+        );
       case "partial":
         return <Badge className="bg-warning/10 text-warning border-warning/30">Will mark: Partial</Badge>;
       case "not_done":
