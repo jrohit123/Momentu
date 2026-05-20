@@ -4,7 +4,7 @@ import path from "path";
 import { componentTagger } from "lovable-tagger";
 
 export default defineConfig(({ mode }) => ({
-  base: "/Momentu/",   // ← add this; use exact repo name, case-sensitive
+  base: "/",   // ← add this; use exact repo name, case-sensitive
   server: {
     host: "::",
     port: 8080,
