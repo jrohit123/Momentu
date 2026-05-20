@@ -1,9 +1,9 @@
-
+```yaml
 name: Deploy React Dev to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 permissions:
   contents: read
@@ -56,3 +56,4 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+```
